@@ -1,0 +1,325 @@
+import { z } from "zod";
+
+/**
+ * @typedef {import("mongoose").Document} MongooseDocument
+ *
+ * @typedef {object} IUser
+ * @property {string} name
+ * @property {string} email
+ * @property {string} passwordHash
+ * @property {string} role
+ * @property {boolean} active
+ * @property {string} orgName
+ *
+ * @typedef {object} IMedicine
+ * @property {string} name
+ * @property {string} genericName
+ * @property {string} brandName
+ * @property {import("mongoose").Types.ObjectId} categoryId
+ * @property {import("mongoose").Types.ObjectId} manufacturerId
+ * @property {number} gstRate
+ * @property {number} reorderThreshold
+ * @property {string} [prefix]
+ * @property {number} ptr
+ * @property {number} maxStockLevel
+ *
+ * @typedef {object} IBatch
+ * @property {import("mongoose").Types.ObjectId} medicineId
+ * @property {string} batchNumber
+ * @property {Date} mfgDate
+ * @property {Date} expiryDate
+ * @property {number} mrp
+ * @property {number} purchasePrice
+ * @property {number} sellingPrice
+ * @property {import("mongoose").Types.ObjectId} [supplierId]
+ * @property {number} currentStock
+ * @property {string} status
+ *
+ * @typedef {object} ISaleItem
+ * @property {import("mongoose").Types.ObjectId} medicineId
+ * @property {import("mongoose").Types.ObjectId} batchId
+ * @property {string} medicineName
+ * @property {string} batchNumber
+ * @property {number} quantity
+ * @property {number} unitPrice
+ * @property {number} discountPct
+ * @property {number} gstRate
+ * @property {number} lineTotal
+ *
+ * @typedef {object} ISale
+ * @property {string} invoiceNo
+ * @property {string} [customerName]
+ * @property {string} [customerPhone]
+ * @property {ISaleItem[]} items
+ * @property {number} subtotal
+ * @property {number} discountTotal
+ * @property {number} gstTotal
+ * @property {number} roundOff
+ * @property {number} grandTotal
+ * @property {string} paymentMode
+ * @property {number} [tender]
+ * @property {number} [change]
+ * @property {string} status
+ *
+ * @typedef {object} IPurchaseItem
+ * @property {import("mongoose").Types.ObjectId} medicineId
+ * @property {import("mongoose").Types.ObjectId} [batchId]
+ * @property {string} medicineName
+ * @property {number} quantity
+ * @property {number} unitCost
+ * @property {number} gstRate
+ * @property {number} lineTotal
+ *
+ * @typedef {object} IPurchase
+ * @property {string} orderNo
+ * @property {import("mongoose").Types.ObjectId} supplierId
+ * @property {IPurchaseItem[]} items
+ * @property {number} subtotal
+ * @property {number} gstTotal
+ * @property {number} grandTotal
+ * @property {string} status
+ * @property {Date} [orderedAt]
+ * @property {Date} [receivedAt]
+ */
+
+export const objectId = () => z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid ObjectId");
+
+const idsSchema = () =>
+  z
+    .string()
+    .optional()
+    .refine((v) => !v || /^[0-9a-fA-F]{24}$/.test(v), "Invalid ObjectId");
+
+const emailSchema = z.string().trim().email("Invalid email").max(160);
+const passwordSchema = z.string().min(6, "Password must be at least 6 characters").max(128);
+
+export const authSchemas = {
+  register: z.object({
+    name: z.string().trim().min(1, "Name is required").max(120),
+    email: emailSchema,
+    password: passwordSchema,
+    role: z.string().trim().optional(),
+    orgName: z.string().trim().optional(),
+  }),
+  login: z.object({
+    email: emailSchema,
+    password: z.string().min(1, "Password is required"),
+  }),
+  changePassword: z.object({
+    currentPassword: z.string().min(1),
+    newPassword: passwordSchema,
+  }),
+};
+
+export const userSchemas = {
+  create: z.object({
+    name: z.string().trim().min(1).max(120),
+    email: emailSchema,
+    password: passwordSchema,
+    role: z.string().trim().min(1),
+    orgName: z.string().trim().optional(),
+  }),
+  update: z
+    .object({
+      name: z.string().trim().min(1).max(120).optional(),
+      role: z.string().trim().min(1).optional(),
+      active: z.boolean().optional(),
+    })
+    .refine((v) => Object.keys(v).length > 0, "At least one field is required"),
+};
+
+const medicineCreateSchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(200),
+  genericName: z.string().trim().optional(),
+  brandName: z.string().trim().optional(),
+  categoryId: idsSchema(),
+  manufacturerId: idsSchema(),
+  hsnCode: z.string().trim().max(20).optional(),
+  gstRate: z.coerce.number().min(0).max(100).default(0),
+  storageRequirements: z.string().trim().optional(),
+  barcode: z.string().trim().max(60).optional(),
+  reorderThreshold: z.coerce.number().int().min(0).default(0),
+  isActive: z.boolean().default(true),
+  prefix: z.string().trim().max(10).optional(),
+  saltComposition: z.string().trim().optional(),
+  strength: z.string().trim().max(40).optional(),
+  dosageForm: z.string().trim().max(40).optional(),
+  packSize: z.string().trim().max(40).optional(),
+  gtin: z.string().trim().max(40).optional(),
+  drugSchedule: z.string().trim().max(40).optional(),
+  dosageInfo: z.string().trim().optional(),
+  usageInstructions: z.string().trim().optional(),
+  contraindications: z.string().trim().optional(),
+  sideEffects: z.string().trim().optional(),
+  maxStockLevel: z.coerce.number().int().min(0).optional(),
+  ptr: z.coerce.number().min(0).optional(),
+  rackLocation: z.string().trim().max(40).optional(),
+});
+export const medicineSchemas = {
+  create: medicineCreateSchema,
+  update: medicineCreateSchema.partial(),
+};
+
+export const batchSchemas = {
+  create: z.object({
+    medicineId: objectId(),
+    batchNumber: z.string().trim().min(1).max(40),
+    mfgDate: z.coerce.date(),
+    expiryDate: z.coerce.date(),
+    mrp: z.coerce.number().min(0).optional(),
+    purchasePrice: z.coerce.number().min(0).optional(),
+    sellingPrice: z.coerce.number().min(0).optional(),
+    supplierId: idsSchema(),
+    currentStock: z.coerce.number().int().min(0).default(0),
+    status: z.string().trim().optional(),
+    locationType: z.string().trim().optional(),
+    rackCode: z.string().trim().max(40).optional(),
+    quantityReceived: z.coerce.number().int().min(0).optional(),
+  }),
+  update: z.object({
+    batchNumber: z.string().trim().min(1).max(40).optional(),
+    mfgDate: z.coerce.date().optional(),
+    expiryDate: z.coerce.date().optional(),
+    mrp: z.coerce.number().min(0).optional(),
+    purchasePrice: z.coerce.number().min(0).optional(),
+    sellingPrice: z.coerce.number().min(0).optional(),
+    supplierId: idsSchema(),
+    status: z.string().trim().optional(),
+    locationType: z.string().trim().optional(),
+    rackCode: z.string().trim().max(40).optional(),
+  }),
+};
+
+const categoryCreateSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  description: z.string().trim().optional(),
+});
+export const categorySchemas = {
+  create: categoryCreateSchema,
+  update: categoryCreateSchema.partial(),
+};
+
+const manufacturerCreateSchema = z.object({
+  name: z.string().trim().min(1).max(160),
+  contactInfo: z.string().trim().optional(),
+  address: z.string().trim().optional(),
+});
+export const manufacturerSchemas = {
+  create: manufacturerCreateSchema,
+  update: manufacturerCreateSchema.partial(),
+};
+
+const supplierCreateSchema = z.object({
+  name: z.string().trim().min(1).max(160),
+  contactInfo: z.string().trim().optional(),
+  gstNumber: z.string().trim().max(40).optional(),
+  paymentTerms: z.string().trim().max(80).optional(),
+  address: z.string().trim().optional(),
+  phone: z.string().trim().max(30).optional(),
+  email: z.string().trim().email().optional().or(z.literal("")),
+});
+export const supplierSchemas = {
+  create: supplierCreateSchema,
+  update: supplierCreateSchema.partial(),
+};
+
+export const inventorySchemas = {
+  addStock: z.object({
+    batchId: objectId(),
+    locationType: z.string().trim().min(1),
+    rackCode: z.string().trim().min(1).max(40),
+    quantity: z.coerce.number().int().positive("Quantity must be positive"),
+    referenceDocId: idsSchema(),
+  }),
+  adjustStock: z.object({
+    batchId: objectId(),
+    locationType: z.string().trim().optional(),
+    rackCode: z.string().trim().optional(),
+    newQuantity: z.coerce.number().int().min(0),
+    reason: z.string().trim().optional(),
+  }),
+  movement: z.object({
+    movementType: z.string().trim().min(1),
+    quantityChange: z.coerce.number().int().refine((v) => v !== 0, "Cannot be zero"),
+    batchId: objectId(),
+    locationType: z.string().trim().optional(),
+    rackCode: z.string().trim().optional(),
+    referenceDocId: idsSchema(),
+    note: z.string().trim().optional(),
+  }),
+};
+
+export const purchaseSchemas = {
+  create: z.object({
+    supplierId: objectId(),
+    items: z
+      .array(
+        z.object({
+          medicineId: objectId(),
+          quantity: z.coerce.number().int().positive(),
+          unitCost: z.coerce.number().min(0),
+          gstRate: z.coerce.number().min(0).max(100).default(0),
+        }),
+      )
+      .min(1, "At least one item is required"),
+    discount: z.coerce.number().min(0).default(0),
+    notes: z.string().trim().optional(),
+    batchNumbers: z.record(z.string(), z.string()).optional(),
+  }),
+  receive: z.object({
+    items: z
+      .array(
+        z.object({
+          itemId: objectId(),
+          quantityReceived: z.coerce.number().int().positive(),
+          batchNumber: z.string().trim().optional(),
+          mfgDate: z.coerce.date().optional(),
+          expiryDate: z.coerce.date().optional(),
+          mrp: z.coerce.number().min(0).optional(),
+          sellingPrice: z.coerce.number().min(0).optional(),
+          locationType: z.string().trim().optional(),
+          rackCode: z.string().trim().optional(),
+        }),
+      )
+      .min(1),
+  }),
+  updateStatus: z.object({
+    status: z.enum(["draft", "ordered", "received", "partially_received", "cancelled"]),
+  }),
+};
+
+export const saleSchemas = {
+  create: z.object({
+    customerName: z.string().trim().optional(),
+    customerPhone: z.string().trim().max(30).optional(),
+    items: z
+      .array(
+        z.object({
+          medicineId: objectId(),
+          quantity: z.coerce.number().int().positive(),
+          discountPct: z.coerce.number().min(0).max(100).default(0),
+        }),
+      )
+      .min(1, "Cart cannot be empty"),
+    paymentMode: z.string().trim().min(1).default("Cash"),
+    tender: z.coerce.number().min(0).optional(),
+  }),
+  void: z.object({
+    reason: z.string().trim().min(1, "Reason is required").max(300),
+  }),
+};
+
+export const notificationSchemas = {
+  markRead: z.object({
+    ids: z.array(z.string()).min(1),
+  }),
+};
+
+export const auditSchemas = {
+  create: z.object({
+    action: z.string().trim().min(1),
+    entityType: z.string().trim().optional(),
+    entityId: z.string().trim().optional(),
+    details: z.record(z.any()).optional(),
+  }),
+};
