@@ -6,6 +6,7 @@ import { createApp } from "../src/app.js";
 import { env } from "../src/config/env.js";
 import { Role } from "../src/models/Role.js";
 import { User } from "../src/models/User.js";
+import { Batch } from "../src/models/Batch.js";
 
 const uri = process.env.MONGO_URI_TEST ?? env.mongoUri;
 let connected = false;
@@ -122,5 +123,104 @@ describe("full API flow (requires MongoDB)", { skip: !connected && "MongoDB not 
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(Array.isArray(body.data), true);
+  });
+
+  let batchId;
+  let batchMedicineId;
+  test("create a medicine to attach the batch to", async () => {
+    const res = await request("/medicines", {
+      method: "POST",
+      token,
+      body: { name: `Batch Test Med ${Date.now()}` },
+    });
+    assert.equal(res.status, 201);
+    const body = await res.json();
+    batchMedicineId = String(body.data._id);
+  });
+
+  test("create a batch with the nested payload", async () => {
+    const res = await request("/batches", {
+      method: "POST",
+      token,
+      body: {
+        medicineId: batchMedicineId,
+        batchNumber: `FS-26-C-${Date.now().toString().slice(-4)}`,
+        batchType: "C",
+        dates: {
+          manufacturingDate: "2026-01-01T00:00:00.000Z",
+          expiryDate: "2028-01-01T00:00:00.000Z",
+        },
+        pricing: { purchasePrice: 10, mrp: 15, sellingPrice: 14, gstRate: 12 },
+        status: { isRecalled: false, state: "ACTIVE" },
+        stock: { uom: "Units", quantityOnHand: 100, reservedQuantity: 0, quarantined: 0 },
+        warehouse: { locationType: "Front Shelf", rackCode: "A-1" },
+      },
+    });
+    assert.equal(res.status, 201);
+    const body = await res.json();
+    batchId = body.data.id;
+    assert.ok(batchId);
+    assert.equal(body.data.status.state, "ACTIVE");
+    assert.equal(body.data.stock.quantityOnHand, 100);
+    assert.equal(body.data.pricing.mrp, 15);
+    assert.equal(body.data.warehouse.locationType, "Front Shelf");
+    assert.equal(body.data.medicineId, batchMedicineId);
+  });
+
+  test("duplicate batch number returns a friendly 409", async () => {
+    const batch = await Batch.findOne({ _id: batchId }).lean();
+    const res = await request("/batches", {
+      method: "POST",
+      token,
+      body: {
+        medicineId: batchMedicineId,
+        batchNumber: batch.batchNumber,
+        dates: {
+          manufacturingDate: "2026-01-01T00:00:00.000Z",
+          expiryDate: "2028-01-01T00:00:00.000Z",
+        },
+        warehouse: { locationType: "Front Shelf", rackCode: "B-2" },
+      },
+    });
+    assert.equal(res.status, 409);
+  });
+
+  test("list batches returns serialized nested docs with a plain medicineId", async () => {
+    const res = await request("/batches", { token });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    const found = body.data.find((b) => b.id === batchId);
+    assert.ok(found);
+    assert.equal(found.medicineId, batchMedicineId);
+    assert.equal(found.status.state, "ACTIVE");
+  });
+
+  test("quarantine action moves stock into quarantine", async () => {
+    const res = await request(`/batches/${batchId}`, {
+      method: "PATCH",
+      token,
+      body: { action: "quarantine", reason: "QC hold" },
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.data.status.state, "QUARANTINED");
+    assert.equal(body.data.stock.quantityOnHand, 0);
+    assert.equal(body.data.stock.quarantined, 100);
+    assert.ok(body.data.dates.quarantineUntil);
+    assert.ok(body.data.version >= 2);
+  });
+
+  test("get batch detail returns nested fields plus locations", async () => {
+    const res = await request(`/batches/${batchId}`, { token });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.data.id, batchId);
+    assert.equal(body.data.status.state, "QUARANTINED");
+    assert.ok(Array.isArray(body.data.locations));
+  });
+
+  test("delete a batch with no stock on hand", async () => {
+    const res = await request(`/batches/${batchId}`, { method: "DELETE", token });
+    assert.equal(res.status, 204);
   });
 });

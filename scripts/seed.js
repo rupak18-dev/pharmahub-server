@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { randomUUID } from "node:crypto";
 
 import { connectDB, disconnectDB } from "../src/config/db.js";
 import { Category } from "../src/models/Category.js";
@@ -171,8 +172,6 @@ const seedMedicines = [
   },
 ];
 
-const stockPattern = [180, 96, 42, 210, 75, 160, 110];
-
 async function run() {
   await connectDB();
 
@@ -235,6 +234,7 @@ async function run() {
     medDocs.push(med);
   }
 
+  const stockPattern = [180, 96, 42, 210, 75, 160, 110];
   const locationPool = ["Front Shelf", "Front Shelf", "Backroom", "Cold Storage", "Front Shelf", "Backroom"];
   const rackPool = ["Aisle A, Shelf 1", "Aisle A, Shelf 2", "Backroom Rack 1", "Cold Room 1", "Aisle B, Shelf 1", "Backroom Rack 2"];
 
@@ -247,28 +247,84 @@ async function run() {
     const healthy = await Batch.create({
       medicineId: med._id,
       batchNumber: `${med.prefix}-${String(new Date().getFullYear()).slice(-2)}01-${String(i + 1).padStart(2, "0")}`,
-      mfgDate: daysFromNow(-180),
-      expiryDate: daysFromNow(365 + i * 20),
-      mrp: 40 + i * 15,
-      purchasePrice: 25 + i * 10,
-      sellingPrice: 38 + i * 14,
+      batchType: "C",
+      dates: {
+        manufacturingDate: daysFromNow(-180),
+        expiryDate: daysFromNow(365 + i * 20),
+        quarantineUntil: null,
+      },
+      pricing: {
+        purchasePrice: 25 + i * 10,
+        mrp: 40 + i * 15,
+        sellingPrice: 38 + i * 14,
+        gstRate: med.gstRate ?? 12,
+      },
+      status: { isRecalled: false, state: "ACTIVE", quarantineReason: null },
+      stock: {
+        uom: "Units",
+        quantityOnHand: stockQty,
+        reservedQuantity: 0,
+        quarantined: 0,
+      },
+      warehouse: {
+        locationType: locationPool[i % locationPool.length],
+        rackCode: rackPool[i % rackPool.length],
+      },
       supplierId: supplier,
-      currentStock: stockQty,
-      status: "active",
+      audit: { createdAt: new Date(), updatedAt: new Date(), updatedBy: "seed" },
+      version: 1,
+      movements: [
+        {
+          id: randomUUID(),
+          type: "created",
+          note: "Batch seeded",
+          qty: stockQty,
+          timestamp: new Date(),
+          by: "seed",
+        },
+      ],
     });
     batchCount += 1;
 
     await Batch.create({
       medicineId: med._id,
       batchNumber: `${med.prefix}-${String(new Date().getFullYear()).slice(-2)}02-${String(i + 1).padStart(2, "0")}`,
-      mfgDate: daysFromNow(-300),
-      expiryDate: daysFromNow(90),
-      mrp: 40 + i * 15,
-      purchasePrice: 25 + i * 10,
-      sellingPrice: 38 + i * 14,
+      batchType: "C",
+      dates: {
+        manufacturingDate: daysFromNow(-300),
+        expiryDate: daysFromNow(90),
+        quarantineUntil: null,
+      },
+      pricing: {
+        purchasePrice: 25 + i * 10,
+        mrp: 40 + i * 15,
+        sellingPrice: 38 + i * 14,
+        gstRate: med.gstRate ?? 12,
+      },
+      status: { isRecalled: false, state: "ACTIVE", quarantineReason: null },
+      stock: {
+        uom: "Units",
+        quantityOnHand: Math.max(0, Math.round(stockQty / 3)),
+        reservedQuantity: 0,
+        quarantined: 0,
+      },
+      warehouse: {
+        locationType: locationPool[(i + 1) % locationPool.length],
+        rackCode: rackPool[(i + 1) % rackPool.length],
+      },
       supplierId: supDocs[(i + 1) % 2]._id,
-      currentStock: Math.max(0, Math.round(stockQty / 3)),
-      status: "near_expiry",
+      audit: { createdAt: new Date(), updatedAt: new Date(), updatedBy: "seed" },
+      version: 1,
+      movements: [
+        {
+          id: randomUUID(),
+          type: "created",
+          note: "Batch seeded",
+          qty: Math.max(0, Math.round(stockQty / 3)),
+          timestamp: new Date(),
+          by: "seed",
+        },
+      ],
     });
     batchCount += 1;
 

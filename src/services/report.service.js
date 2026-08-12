@@ -1,6 +1,8 @@
 import { Batch } from "../models/Batch.js";
 import { Sale } from "../models/Sale.js";
 import { Purchase } from "../models/Purchase.js";
+import { classifyBatchStatus } from "../utils/date.js";
+import { constants } from "../config/constants.js";
 
 const startOfDay = (d) => {
   const x = new Date(d);
@@ -69,13 +71,13 @@ export async function purchaseReport({ from, to }) {
 
 export async function expiryReport(days = 90) {
   const cutoff = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
-  const expired = await Batch.find({ expiryDate: { $lt: new Date() } }).populate("medicineId", "name genericName brandName").lean();
-  const expiring = await Batch.find({ expiryDate: { $gte: new Date(), $lte: cutoff } }).populate("medicineId", "name genericName brandName").sort({ expiryDate: 1 }).lean();
+  const expired = await Batch.find({ "dates.expiryDate": { $lt: new Date() } }).populate("medicineId", "name genericName brandName").lean();
+  const expiring = await Batch.find({ "dates.expiryDate": { $gte: new Date(), $lte: cutoff } }).populate("medicineId", "name genericName brandName").sort({ "dates.expiryDate": 1 }).lean();
   return {
     days,
     summary: {
       expiredCount: expired.length,
-      expiredValue: expired.reduce((s, b) => s + (b.currentStock ?? 0) * (b.purchasePrice ?? 0), 0),
+      expiredValue: expired.reduce((s, b) => s + (b.stock?.quantityOnHand ?? 0) * (b.pricing?.purchasePrice ?? 0), 0),
       expiringCount: expiring.length,
     },
     expired,
@@ -83,18 +85,25 @@ export async function expiryReport(days = 90) {
   };
 }
 
+const manualStates = new Set(["QUARANTINED", "RECALLED", "BLOCKED", "RETIRED"]);
+function statusBucketOf(b) {
+  const state = b.status?.state;
+  if (manualStates.has(state)) return state.toLowerCase();
+  return classifyBatchStatus(b.dates?.expiryDate, constants.expiry.nearExpiryDays);
+}
+
 export async function stockValuationReport() {
-  const batches = await Batch.find({ currentStock: { $gt: 0 } })
+  const batches = await Batch.find({ "stock.quantityOnHand": { $gt: 0 } })
     .populate("medicineId", "name genericName brandName")
     .lean();
   const byStatus = { active: 0, near_expiry: 0, expired: 0, quarantined: 0 };
   let totalValue = 0;
   let totalUnits = 0;
   for (const b of batches) {
-    const value = (b.currentStock ?? 0) * (b.purchasePrice ?? 0);
+    const value = (b.stock?.quantityOnHand ?? 0) * (b.pricing?.purchasePrice ?? 0);
     totalValue += value;
-    totalUnits += b.currentStock ?? 0;
-    byStatus[b.status] = (byStatus[b.status] ?? 0) + value;
+    totalUnits += b.stock?.quantityOnHand ?? 0;
+    byStatus[statusBucketOf(b)] = (byStatus[statusBucketOf(b)] ?? 0) + value;
   }
   return {
     summary: { totalUnits, totalValue, byStatus },

@@ -85,25 +85,33 @@ export async function receivePurchase(purchaseId, { items }, userId, userName) {
 
         let batch = existingBatch;
         if (batch) {
-          batch.purchasePrice = item.unitCost;
-          if (incoming.mrp != null) batch.mrp = incoming.mrp;
-          if (incoming.sellingPrice != null) batch.sellingPrice = incoming.sellingPrice;
-          if (incoming.expiryDate) batch.expiryDate = incoming.expiryDate;
+          batch.pricing.purchasePrice = item.unitCost;
+          if (incoming.mrp != null) batch.pricing.mrp = incoming.mrp;
+          if (incoming.sellingPrice != null) batch.pricing.sellingPrice = incoming.sellingPrice;
+          if (incoming.expiryDate) batch.dates.expiryDate = incoming.expiryDate;
         } else {
           batch = await Batch.create(
             [{
               medicineId: item.medicineId,
               batchNumber: incoming.batchNumber ?? `BATCH-${generateNumericId(6)}`,
-              mfgDate: incoming.mfgDate ?? new Date(),
-              expiryDate: incoming.expiryDate ?? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-              mrp: incoming.mrp ?? 0,
-              purchasePrice: item.unitCost,
-              sellingPrice: incoming.sellingPrice ?? round2(item.unitCost * 1.2),
+              batchType: "C",
+              dates: {
+                manufacturingDate: incoming.mfgDate ?? new Date(),
+                expiryDate: incoming.expiryDate ?? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+              },
+              pricing: {
+                purchasePrice: item.unitCost,
+                mrp: incoming.mrp ?? 0,
+                sellingPrice: incoming.sellingPrice ?? round2(item.unitCost * 1.2),
+                gstRate: item.gstRate ?? 0,
+              },
+              status: { state: "ACTIVE" },
+              stock: { uom: "Units", quantityOnHand: 0, reservedQuantity: 0, quarantined: 0 },
+              warehouse: {
+                locationType: incoming.locationType ?? "Front Shelf",
+                rackCode: incoming.rackCode ?? "UNASSIGNED",
+              },
               supplierId: purchase.supplierId,
-              currentStock: 0,
-              status: "active",
-              locationType: incoming.locationType ?? "Front Shelf",
-              rackCode: incoming.rackCode ?? "UNASSIGNED",
             }],
             { session },
           );
