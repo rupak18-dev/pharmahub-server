@@ -20,8 +20,8 @@ export async function dashboardStats() {
       Sale.find({ status: "completed", createdAt: { $gte: today, $lt: tomorrow } }).lean(),
       Sale.find({ status: "completed", createdAt: { $gte: weekAgo } }).lean(),
       Medicine.find({ isActive: true }).lean(),
-      Batch.find({ expiryDate: { $gt: new Date(), $lte: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000) } }).lean(),
-      Batch.countDocuments({ expiryDate: { $lt: new Date() } }),
+      Batch.find({ "dates.expiryDate": { $gt: new Date(), $lte: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000) } }).lean(),
+      Batch.countDocuments({ "dates.expiryDate": { $lt: new Date() } }),
       Medicine.countDocuments(),
       Purchase.countDocuments(),
     ]);
@@ -29,12 +29,12 @@ export async function dashboardStats() {
   const batches = await Batch.find({}).lean();
   const stockByMedicine = new Map();
   for (const b of batches) {
-    stockByMedicine.set(String(b.medicineId), (stockByMedicine.get(String(b.medicineId)) ?? 0) + (b.currentStock ?? 0));
+    stockByMedicine.set(String(b.medicineId), (stockByMedicine.get(String(b.medicineId)) ?? 0) + (b.stock?.quantityOnHand ?? 0));
   }
   const lowStockList = lowStock.filter((m) => (stockByMedicine.get(String(m._id)) ?? 0) <= m.reorderThreshold);
 
-  const totalStock = batches.reduce((s, b) => s + (b.currentStock ?? 0), 0);
-  const stockValue = batches.reduce((s, b) => s + (b.currentStock ?? 0) * (b.purchasePrice ?? 0), 0);
+  const totalStock = batches.reduce((s, b) => s + (b.stock?.quantityOnHand ?? 0), 0);
+  const stockValue = batches.reduce((s, b) => s + (b.stock?.quantityOnHand ?? 0) * (b.pricing?.purchasePrice ?? 0), 0);
   const totalUnitsSoldToday = todaySales.reduce((s, x) => s + x.items.reduce((a, i) => a + i.quantity, 0), 0);
 
   const daily = [];
@@ -80,15 +80,15 @@ export async function dashboardStats() {
 export async function getDashboardNotifications(limit = 20) {
   const lowStock = await getLowStockList();
   const expiring = await Batch.find({
-    expiryDate: { $gt: new Date(), $lte: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000) },
+    "dates.expiryDate": { $gt: new Date(), $lte: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000) },
   })
     .populate("medicineId", "name")
-    .sort({ expiryDate: 1 })
+    .sort({ "dates.expiryDate": 1 })
     .limit(limit)
     .lean();
-  const expired = await Batch.find({ expiryDate: { $lt: new Date() } })
+  const expired = await Batch.find({ "dates.expiryDate": { $lt: new Date() } })
     .populate("medicineId", "name")
-    .sort({ expiryDate: -1 })
+    .sort({ "dates.expiryDate": -1 })
     .limit(limit)
     .lean();
 
@@ -107,7 +107,7 @@ export async function getDashboardNotifications(limit = 20) {
     notifications.push({
       type: "expiry",
       title: "Batch expiring soon",
-      body: `${b.medicineId?.name ?? "Medicine"} · batch ${b.batchNumber} expires ${b.expiryDate.toISOString().slice(0, 10)}`,
+      body: `${b.medicineId?.name ?? "Medicine"} · batch ${b.batchNumber} expires ${new Date(b.dates?.expiryDate).toISOString().slice(0, 10)}`,
       entityType: "batch",
       entityId: String(b._id),
       createdAt: new Date(),
@@ -144,7 +144,7 @@ async function getLowStockList(limit = 50) {
   const batches = await Batch.find({}).lean();
   const stockByMedicine = new Map();
   for (const b of batches) {
-    stockByMedicine.set(String(b.medicineId), (stockByMedicine.get(String(b.medicineId)) ?? 0) + (b.currentStock ?? 0));
+    stockByMedicine.set(String(b.medicineId), (stockByMedicine.get(String(b.medicineId)) ?? 0) + (b.stock?.quantityOnHand ?? 0));
   }
   const list = medicines
     .filter((m) => (stockByMedicine.get(String(m._id)) ?? 0) <= m.reorderThreshold)
