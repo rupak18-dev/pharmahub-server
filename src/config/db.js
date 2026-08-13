@@ -15,7 +15,7 @@ export async function connectDB() {
   });
 
   await mongoose.connect(env.mongoUri, {
-    serverSelectionTimeoutMS: 5000,
+    serverSelectionTimeoutMS: 30000,
   });
   return mongoose.connection;
 }
