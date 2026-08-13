@@ -7,7 +7,7 @@ function ensureWorkingDns() {
   const servers = getServers();
   const stuckOnLoopback = servers.every((s) => s === "127.0.0.1" || s === "::1");
   if (stuckOnLoopback) {
-    setServers(["10.255.237.185", "8.8.8.8", "1.1.1.1"]);
+    setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);
   }
 }
 
