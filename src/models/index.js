@@ -12,3 +12,5 @@ export { Purchase } from "./Purchase.js";
 export { Sale } from "./Sale.js";
 export { AuditLog } from "./AuditLog.js";
 export { Notification } from "./Notification.js";
+export { SavedReport } from "./SavedReport.js";
+export { ScheduledReport } from "./ScheduledReport.js";
