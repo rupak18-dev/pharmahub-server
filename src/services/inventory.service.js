@@ -28,7 +28,7 @@ export async function addStock({ batchId, locationType, rackCode, quantity, refe
         { new: true, session },
       );
 
-      batch.currentStock += quantity;
+      batch.stock.quantityOnHand += quantity;
       await batch.save({ session });
 
       await InventoryLedger.create(
@@ -63,7 +63,7 @@ export async function removeStock({ batchId, locationType, rackCode, quantity, m
         { new: true, session },
       );
 
-      await Batch.findByIdAndUpdate(batchId, { $inc: { currentStock: -quantity } }, { session });
+      await Batch.findByIdAndUpdate(batchId, { $inc: { "stock.quantityOnHand": -quantity } }, { session });
       await InventoryLedger.create(
         [{ batchId, movementType, quantityChange: -quantity, userId, userName, referenceDocId, note }],
         { session },
@@ -93,7 +93,7 @@ export async function adjustStock({ batchId, newQuantity, reason, userId, userNa
       const delta = newQuantity - oldQuantity;
       item = await InventoryItem.findByIdAndUpdate(record._id, { quantityOnHand: newQuantity }, { new: true, session });
 
-      batch.currentStock = Math.max(0, batch.currentStock + delta);
+      batch.stock.quantityOnHand = Math.max(0, batch.stock.quantityOnHand + delta);
       await batch.save({ session });
 
       await InventoryLedger.create(

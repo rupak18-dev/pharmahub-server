@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { constants } from "../config/constants.js";
+
 /**
  * @typedef {import("mongoose").Document} MongooseDocument
  *
@@ -25,15 +27,30 @@ import { z } from "zod";
  *
  * @typedef {object} IBatch
  * @property {import("mongoose").Types.ObjectId} medicineId
- * @property {string} batchNumber
- * @property {Date} mfgDate
- * @property {Date} expiryDate
- * @property {number} mrp
- * @property {number} purchasePrice
- * @property {number} sellingPrice
  * @property {import("mongoose").Types.ObjectId} [supplierId]
- * @property {number} currentStock
- * @property {string} status
+ * @property {string} batchNumber
+ * @property {"C"|"L"|"V"} [batchType]
+ * @property {object} dates
+ * @property {Date} dates.manufacturingDate
+ * @property {Date} dates.expiryDate
+ * @property {Date|null} [dates.quarantineUntil]
+ * @property {object} pricing
+ * @property {number} pricing.purchasePrice
+ * @property {number} pricing.mrp
+ * @property {number} pricing.sellingPrice
+ * @property {number} pricing.gstRate
+ * @property {object} status
+ * @property {boolean} status.isRecalled
+ * @property {"ACTIVE"|"QUARANTINED"|"RECALLED"|"BLOCKED"|"RETIRED"} status.state
+ * @property {string|null} [status.quarantineReason]
+ * @property {object} stock
+ * @property {string} stock.uom
+ * @property {number} stock.quantityOnHand
+ * @property {number} stock.reservedQuantity
+ * @property {number} stock.quarantined
+ * @property {object} warehouse
+ * @property {string} warehouse.locationType
+ * @property {string} warehouse.rackCode
  *
  * @typedef {object} ISaleItem
  * @property {import("mongoose").Types.ObjectId} medicineId
@@ -160,34 +177,104 @@ export const medicineSchemas = {
   update: medicineCreateSchema.partial(),
 };
 
+const BATCH_STATES = ["ACTIVE", "QUARANTINED", "RECALLED", "BLOCKED", "RETIRED"];
+const BATCH_LOCATIONS = constants.locationTypes;
+
+const batchUpdateFields = {
+  medicineId: idsSchema(),
+  supplierId: z.string().nullable().optional(),
+  batchNumber: z.string().trim().min(1).max(40).optional(),
+  batchType: z.enum(["C", "L", "V"]).optional(),
+  dates: z
+    .object({
+      manufacturingDate: z.coerce.date().optional(),
+      expiryDate: z.coerce.date().optional(),
+      quarantineUntil: z.coerce.date().nullable().optional(),
+    })
+    .optional(),
+  pricing: z
+    .object({
+      purchasePrice: z.coerce.number().min(0).optional(),
+      mrp: z.coerce.number().min(0).optional(),
+      sellingPrice: z.coerce.number().min(0).optional(),
+      gstRate: z.coerce.number().min(0).optional(),
+    })
+    .optional(),
+  status: z
+    .object({
+      isRecalled: z.boolean().optional(),
+      state: z.enum(BATCH_STATES).optional(),
+      quarantineReason: z.string().nullable().optional(),
+    })
+    .optional(),
+  stock: z
+    .object({
+      uom: z.string().optional(),
+      quantityOnHand: z.coerce.number().int().min(0).optional(),
+      reservedQuantity: z.coerce.number().int().min(0).optional(),
+      quarantined: z.coerce.number().int().min(0).optional(),
+    })
+    .optional(),
+  warehouse: z
+    .object({
+      locationType: z.enum(BATCH_LOCATIONS).optional(),
+      rackCode: z.string().trim().max(40).optional(),
+    })
+    .optional(),
+};
+
+export const batchActions = ["quarantine", "activate", "recall", "block", "retire"];
+
+const batchActionSchema = z.object({
+  action: z.enum(batchActions),
+  reason: z.string().trim().max(300).optional(),
+});
+
 export const batchSchemas = {
   create: z.object({
     medicineId: objectId(),
+    supplierId: z.string().nullable().optional(),
     batchNumber: z.string().trim().min(1).max(40),
-    mfgDate: z.coerce.date(),
-    expiryDate: z.coerce.date(),
-    mrp: z.coerce.number().min(0).optional(),
-    purchasePrice: z.coerce.number().min(0).optional(),
-    sellingPrice: z.coerce.number().min(0).optional(),
-    supplierId: idsSchema(),
-    currentStock: z.coerce.number().int().min(0).default(0),
-    status: z.string().trim().optional(),
-    locationType: z.string().trim().optional(),
-    rackCode: z.string().trim().max(40).optional(),
-    quantityReceived: z.coerce.number().int().min(0).optional(),
+    batchType: z.enum(["C", "L", "V"]).default("C"),
+    dates: z.object({
+      manufacturingDate: z.coerce.date(),
+      expiryDate: z.coerce.date(),
+      quarantineUntil: z.coerce.date().nullable().optional(),
+    }),
+    pricing: z
+      .object({
+        purchasePrice: z.coerce.number().min(0).default(0),
+        mrp: z.coerce.number().min(0).default(0),
+        sellingPrice: z.coerce.number().min(0).default(0),
+        gstRate: z.coerce.number().min(0).default(0),
+      })
+      .optional(),
+    status: z
+      .object({
+        isRecalled: z.boolean().optional().default(false),
+        state: z.enum(BATCH_STATES).optional().default("ACTIVE"),
+        quarantineReason: z.string().nullable().optional().default(null),
+      })
+      .optional(),
+    stock: z
+      .object({
+        uom: z.string().optional().default("Units"),
+        quantityOnHand: z.coerce.number().int().min(0).default(0),
+        reservedQuantity: z.coerce.number().int().min(0).default(0),
+        quarantined: z.coerce.number().int().min(0).default(0),
+      })
+      .optional(),
+    warehouse: z.object({
+      locationType: z.enum(BATCH_LOCATIONS),
+      rackCode: z.string().trim().max(40).default(""),
+    }),
   }),
-  update: z.object({
-    batchNumber: z.string().trim().min(1).max(40).optional(),
-    mfgDate: z.coerce.date().optional(),
-    expiryDate: z.coerce.date().optional(),
-    mrp: z.coerce.number().min(0).optional(),
-    purchasePrice: z.coerce.number().min(0).optional(),
-    sellingPrice: z.coerce.number().min(0).optional(),
-    supplierId: idsSchema(),
-    status: z.string().trim().optional(),
-    locationType: z.string().trim().optional(),
-    rackCode: z.string().trim().max(40).optional(),
-  }),
+  update: z.object(batchUpdateFields),
+  action: batchActionSchema,
+  patch: z.union([
+    batchActionSchema,
+    z.object(batchUpdateFields).refine((v) => Object.keys(v).length > 0, "At least one field is required"),
+  ]),
 };
 
 const categoryCreateSchema = z.object({
