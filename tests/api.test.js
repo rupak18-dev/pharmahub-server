@@ -56,10 +56,18 @@ describe("full API flow (requires MongoDB)", { skip: !connected && "MongoDB not 
     assert.equal(res.status, 401);
   });
 
+  test("register rejects a weak password", async () => {
+    const res = await request("/auth/register", {
+      method: "POST",
+      body: { email: `weak-${Date.now()}@pharmahub.demo`, password: "password123" },
+    });
+    assert.equal(res.status, 422);
+  });
+
   test("register a new user", async () => {
     const res = await request("/auth/register", {
       method: "POST",
-      body: { name: "Integration Tester", email, password: "password123" },
+      body: { name: "Integration Tester", email, password: "Password123!" },
     });
     assert.equal(res.status, 201);
   });
@@ -68,9 +76,12 @@ describe("full API flow (requires MongoDB)", { skip: !connected && "MongoDB not 
   test("login as the new user", async () => {
     const res = await request("/auth/login", {
       method: "POST",
-      body: { email, password: "password123" },
+      body: { email, password: "Password123!" },
     });
     assert.equal(res.status, 200);
+    const setCookie = res.headers.get("set-cookie") ?? "";
+    assert.match(setCookie, /pharmahub_session=/);
+    assert.match(setCookie, /HttpOnly/);
     const body = await res.json();
     token = body.data.token;
     assert.ok(token);
@@ -82,6 +93,14 @@ describe("full API flow (requires MongoDB)", { skip: !connected && "MongoDB not 
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.data.email, email);
+  });
+
+  test("logout clears the session cookie", async () => {
+    const res = await request("/auth/logout", { method: "POST" });
+    assert.equal(res.status, 200);
+    const setCookie = res.headers.get("set-cookie") ?? "";
+    assert.match(setCookie, /pharmahub_session=/);
+    assert.match(setCookie, /expires=Thu, 01 Jan 1970/i);
   });
 
   test("create a category with the token", async () => {
@@ -100,13 +119,13 @@ describe("full API flow (requires MongoDB)", { skip: !connected && "MongoDB not 
     const created = await request("/users", {
       method: "POST",
       token,
-      body: { name: "Test Cashier", email: cashierEmail, password: "password123", role: "Cashier" },
+      body: { name: "Test Cashier", email: cashierEmail, password: "Password123!", role: "Cashier" },
     });
     assert.equal(created.status, 201);
 
     const login = await request("/auth/login", {
       method: "POST",
-      body: { email: cashierEmail, password: "password123" },
+      body: { email: cashierEmail, password: "Password123!" },
     });
     const cashierToken = (await login.json()).data.token;
 

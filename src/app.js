@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
@@ -8,6 +9,7 @@ import { env } from "./config/env.js";
 import { constants } from "./config/constants.js";
 import apiRoutes from "./routes/index.js";
 import { notFound, errorHandler } from "./middlewares/errorHandler.js";
+import { csrfOriginGuard } from "./middlewares/csrf.js";
 import { stream } from "./core/logger.js";
 
 export function createApp() {
@@ -15,7 +17,13 @@ export function createApp() {
 
   app.disable("x-powered-by");
   app.use(helmet());
-  app.use(cors({ origin: env.corsOrigin === "*" ? true : env.corsOrigin }));
+  app.use(
+    cors({
+      origin: env.corsOrigin === "*" ? true : env.corsOrigin,
+      credentials: true,
+    }),
+  );
+  app.use(cookieParser());
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: true }));
 
@@ -42,7 +50,7 @@ export function createApp() {
     });
   });
 
-  app.use(constants.app.apiPrefix, apiRoutes);
+  app.use(constants.app.apiPrefix, csrfOriginGuard, apiRoutes);
 
   app.use(notFound);
   app.use(errorHandler);

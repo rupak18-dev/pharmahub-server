@@ -2,6 +2,7 @@ import { Router } from "express";
 
 import healthRoutes from "./health.routes.js";
 import authRoutes from "./auth.routes.js";
+import onboardingRoutes from "./onboarding.routes.js";
 import userRoutes from "./user.routes.js";
 import roleRoutes from "./role.routes.js";
 import categoryRoutes from "./category.routes.js";
@@ -21,6 +22,7 @@ const router = Router();
 
 router.use("/", healthRoutes);
 router.use("/auth", authRoutes);
+router.use("/onboarding", onboardingRoutes);
 router.use("/users", userRoutes);
 router.use("/roles", roleRoutes);
 router.use("/categories", categoryRoutes);

@@ -108,11 +108,18 @@ const idsSchema = () =>
     .refine((v) => !v || /^[0-9a-fA-F]{24}$/.test(v), "Invalid ObjectId");
 
 const emailSchema = z.string().trim().email("Invalid email").max(160);
-const passwordSchema = z.string().min(6, "Password must be at least 6 characters").max(128);
+const passwordSchema = z
+  .string()
+  .min(8, "Password must be at least 8 characters")
+  .max(128)
+  .regex(/[A-Z]/, "Password must include an uppercase letter")
+  .regex(/[a-z]/, "Password must include a lowercase letter")
+  .regex(/[0-9]/, "Password must include a number")
+  .regex(/[^A-Za-z0-9]/, "Password must include a special character");
 
 export const authSchemas = {
   register: z.object({
-    name: z.string().trim().min(1, "Name is required").max(120),
+    name: z.string().trim().max(120).optional(),
     email: emailSchema,
     password: passwordSchema,
     role: z.string().trim().optional(),
@@ -122,9 +129,40 @@ export const authSchemas = {
     email: emailSchema,
     password: z.string().min(1, "Password is required"),
   }),
+  profile: z.object({
+    name: z.string().trim().min(1, "Name is required").max(120).optional(),
+    role: z.string().trim().min(1, "Role is required").optional(),
+    orgName: z.string().trim().max(120).optional(),
+    onboarded: z.boolean().optional(),
+  }),
   changePassword: z.object({
     currentPassword: z.string().min(1),
     newPassword: passwordSchema,
+  }),
+};
+
+export const onboardingSchemas = {
+  upsert: z.object({
+    businessType: z.enum(["retail", "dealer", "enterprise", "hospital", "other"]).optional(),
+    personal: z
+      .object({
+        firstName: z.string().trim().max(80).optional(),
+        lastName: z.string().trim().max(80).optional(),
+        phone: z.string().trim().max(20).optional(),
+        jobTitle: z.string().trim().max(120).optional(),
+      })
+      .optional(),
+    workspace: z
+      .object({
+        organizationName: z.string().trim().max(120).optional(),
+        branchName: z.string().trim().max(120).optional(),
+        drugLicenseNumber: z.string().trim().max(80).optional(),
+        gstNumber: z.string().trim().max(80).optional(),
+      })
+      .optional(),
+    quickStart: z.array(z.string()).optional(),
+    currentStep: z.number().int().min(0).optional(),
+    completedAt: z.string().datetime().nullable().optional(),
   }),
 };
 
