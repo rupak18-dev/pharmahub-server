@@ -41,23 +41,23 @@ The API will be available at `http://localhost:5000/api/v1`.
 | `npm test`       | Run tests (Node test runner)                 |
 | `npm run lint`   | Lint with ESLint                             |
 
-## Demo accounts (created by `npm run seed`, password `password123`)
+## Demo accounts
 
-| Email                        | Role              |
-| ---------------------------- | ----------------- |
-| `owner@pharmahub.demo`       | Owner             |
-| `pharmacist@pharmahub.demo`  | Pharmacist        |
-| `cashier@pharmahub.demo`     | Cashier           |
-| `inventory@pharmahub.demo`   | Inventory Manager |
+Demo accounts were removed in favor of real authentication. Accounts are created
+by registering through the app (or `POST /api/v1/auth/register`).
 
 ## Quick smoke test
 
 ```bash
 curl http://localhost:5000/api/v1/health
 
+curl -X POST http://localhost:5000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"your-password"}'
+
 curl -X POST http://localhost:5000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"owner@pharmahub.demo","password":"password123"}'
+  -d '{"email":"you@example.com","password":"your-password"}'
 ```
 
 Use the returned `token` in the `Authorization: Bearer <token>` header for all

@@ -1,4 +1,3 @@
-import bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
 
 import { connectDB, disconnectDB } from "../src/config/db.js";
@@ -337,35 +336,12 @@ async function run() {
     });
   }
 
-  const users = [
-    { name: "Store Owner", email: "owner@pharmahub.demo", role: "Owner", orgName: "PharmaHub" },
-    { name: "Demo Pharmacist", email: "pharmacist@pharmahub.demo", role: "Pharmacist", orgName: "PharmaHub" },
-    { name: "Demo Cashier", email: "cashier@pharmahub.demo", role: "Cashier", orgName: "PharmaHub" },
-    { name: "Inventory Manager", email: "inventory@pharmahub.demo", role: "Inventory Manager", orgName: "PharmaHub" },
-  ];
-  let userCount = 0;
-  for (const u of users) {
-    const exists = await User.findOne({ email: u.email });
-    if (!exists) {
-      await User.create({
-        ...u,
-        passwordHash: await bcrypt.hash("password123", 10),
-      });
-      userCount += 1;
-    }
-  }
-
   console.log("[seed] done");
   console.log(`  categories   : ${catDocs.length}`);
   console.log(`  manufacturers: ${mfrDocs.length}`);
   console.log(`  suppliers    : ${supDocs.length}`);
   console.log(`  medicines    : ${medDocs.length}`);
   console.log(`  batches      : ${batchCount}`);
-  console.log(`  users        : ${userCount} created`);
-  console.log("");
-  console.log("  Sign-in accounts (password: password123)");
-  console.log("  owner@pharmahub.demo   | pharmacist@pharmahub.demo");
-  console.log("  cashier@pharmahub.demo | inventory@pharmahub.demo");
 
   await disconnectDB();
 }
