@@ -10,6 +10,7 @@ import { constants } from "./config/constants.js";
 import apiRoutes from "./routes/index.js";
 import { notFound, errorHandler } from "./middlewares/errorHandler.js";
 import { csrfOriginGuard } from "./middlewares/csrf.js";
+import { normalizeOrigins } from "./utils/origin.js";
 import { stream } from "./core/logger.js";
 
 export function createApp() {
@@ -17,9 +18,12 @@ export function createApp() {
 
   app.disable("x-powered-by");
   app.use(helmet());
+  const allowedOrigins = normalizeOrigins(env.corsOrigin);
   app.use(
     cors({
-      origin: env.corsOrigin === "*" ? true : env.corsOrigin,
+      // Dev servers (e.g. the Vite proxy) are permissive; production reflects
+      // only the configured CORS origin(s).
+      origin: env.isProduction && allowedOrigins.length ? allowedOrigins : true,
       credentials: true,
     }),
   );
