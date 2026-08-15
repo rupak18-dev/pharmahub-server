@@ -70,6 +70,11 @@ describe("full API flow (requires MongoDB)", { skip: !connected && "MongoDB not 
       body: { name: "Integration Tester", email, password: "Password123!" },
     });
     assert.equal(res.status, 201);
+    const setCookie = res.headers.get("set-cookie") ?? "";
+    assert.match(setCookie, /pharmahub_session=/);
+    const body = await res.json();
+    assert.ok(body.data.token);
+    assert.equal(body.data.user.onboarded, false);
   });
 
   let token;

@@ -21,7 +21,8 @@ export async function registerUser({ name, email, password, orgName }) {
     orgName,
   });
 
-  return { user: toPublicUser(user) };
+  const token = signToken(user._id);
+  return { token, user: toPublicUser(user) };
 }
 
 export async function updateProfile(userId, { name, role, orgName, onboarded }) {
@@ -46,9 +47,64 @@ export async function loginUser({ email, password }) {
   if (!user || !user.active) {
     throw ApiError.unauthorized("Invalid email or password");
   }
+  if (!user.passwordHash) {
+    throw ApiError.unauthorized("This account uses Google sign-in. Please continue with Google.");
+  }
 
   const match = await bcrypt.compare(password, user.passwordHash);
   if (!match) throw ApiError.unauthorized("Invalid email or password");
+
+  const token = signToken(user._id);
+  return { token, user: toPublicUser(user) };
+}
+
+/**
+ * Links a verified Google profile to an existing account (by email) and signs
+ * it in. Only reached when an account already exists — brand-new Google emails
+ * go through the OTP flow instead.
+ */
+export async function signInWithGoogle({ googleId, email, name, picture }) {
+  const user = await User.findOne({ email }).collation({ locale: "en", strength: 2 });
+  if (!user) throw ApiError.notFound("No account found for this email");
+
+  if (user.googleId !== googleId) {
+    user.googleId = googleId;
+    user.provider = "google";
+  }
+  if (picture && !user.picture) user.picture = picture;
+  if (!user.name && name) user.name = name;
+  await user.save();
+
+  const token = signToken(user._id);
+  return { token, user: toPublicUser(user) };
+}
+
+/**
+ * Signs a Google profile up: creates the account, or links the Google identity
+ * to an account that already exists for that email.
+ */
+export async function signUpWithGoogle({ googleId, email, name, picture }) {
+  const existing = await User.findOne({ email }).collation({ locale: "en", strength: 2 });
+  if (existing) {
+    if (!existing.googleId) {
+      existing.googleId = googleId;
+      existing.provider = "google";
+    }
+    if (picture && !existing.picture) existing.picture = picture;
+    if (!existing.name && name) existing.name = name;
+    await existing.save();
+    const token = signToken(existing._id);
+    return { token, user: toPublicUser(existing) };
+  }
+
+  const user = await User.create({
+    name: name ?? email.split("@")[0],
+    email,
+    picture: picture ?? null,
+    googleId,
+    provider: "google",
+    onboarded: false,
+  });
 
   const token = signToken(user._id);
   return { token, user: toPublicUser(user) };
@@ -58,10 +114,14 @@ export async function changePassword(userId, { currentPassword, newPassword }) {
   const user = await User.findById(userId).select("+passwordHash");
   if (!user) throw ApiError.notFound("User not found");
 
-  const match = await bcrypt.compare(currentPassword, user.passwordHash);
-  if (!match) throw ApiError.badRequest("Current password is incorrect");
+  // Google-created accounts have no password yet, so they can set one directly.
+  if (user.passwordHash) {
+    const match = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!match) throw ApiError.badRequest("Current password is incorrect");
+  }
 
   user.passwordHash = await bcrypt.hash(newPassword, 10);
+  user.provider = "email";
   await user.save();
   return true;
 }
@@ -99,6 +159,9 @@ export function toPublicUser(user) {
     email: user.email,
     role: user.role,
     orgName: user.orgName,
+    provider: user.provider ?? "email",
+    picture: user.picture ?? null,
+    emailVerified: user.emailVerified ?? true,
     active: user.active,
     onboarded: user.onboarded,
     createdAt: user.createdAt,
