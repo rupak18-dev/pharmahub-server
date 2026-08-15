@@ -69,6 +69,28 @@ other endpoints.
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — folder structure and layering
 - [DATA_MODEL.md](docs/DATA_MODEL.md) — MongoDB collections and relationships
 
+## Deployment (Render)
+
+A push to `main` runs the CI + deploy workflow (`.github/workflows/deploy.yml`):
+lint and tests, then a deploy is triggered on Render via its REST API.
+
+**GitHub repository secrets** (Settings → Secrets and variables → Actions):
+
+| Secret              | Value                                                        |
+| ------------------- | ------------------------------------------------------------ |
+| `RENDER_API_KEY`    | Render.com → Account settings → API keys                     |
+| `RENDER_SERVICE_ID` | The `srv-...` ID from your Render service URL                 |
+
+**Render service env vars** (set in the Render dashboard):
+
+| Var         | Example                                            |
+| ----------- | -------------------------------------------------- |
+| `MONGO_URI` | `mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/pharmahub` |
+| `JWT_SECRET`| a long random string                                |
+
+The service definition is also version-controlled in [`render.yaml`](render.yaml)
+(web service, Node runtime, `npm start`, health check at `/api/v1/health`).
+
 ## Folder structure
 
 ```
