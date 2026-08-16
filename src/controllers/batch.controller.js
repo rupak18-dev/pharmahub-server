@@ -65,6 +65,22 @@ export const getBatch = asyncHandler(async (req, res) => {
 export const createBatch = asyncHandler(async (req, res) => {
   const now = new Date();
   const quantityOnHand = req.body.stock?.quantityOnHand ?? 0;
+
+  // Guard against duplicate batch numbers regardless of whether the unique
+  // index exists on the collection (legacy databases may still carry a
+  // non-unique index from before the schema was updated).
+  const existing = await Batch.findOne({
+    medicineId: req.body.medicineId,
+    batchNumber: req.body.batchNumber,
+  })
+    .select("_id")
+    .lean();
+  if (existing) {
+    throw ApiError.conflict(
+      `A batch with number "${req.body.batchNumber}" already exists for this medicine`,
+    );
+  }
+
   const batch = new Batch({
     ...req.body,
     audit: { createdAt: now, updatedAt: now, updatedBy: req.user?.name },
