@@ -21,6 +21,12 @@ import { recordAudit } from "../services/audit.service.js";
 
 const STATE_COOKIE_MAX_AGE_MS = 10 * 60 * 1000;
 
+// FRONTEND_URL is often configured with a trailing slash (or defaulted to one),
+// which would turn `/auth/callback` into `//auth/callback` and 404 in the SPA.
+function frontendUrlBase() {
+  return String(env.google.frontendUrl ?? "").replace(/\/+$/, "");
+}
+
 function googleStateCookieOptions() {
   return {
     httpOnly: true,
@@ -33,7 +39,7 @@ function googleStateCookieOptions() {
 
 function googleCallbackRedirect({ token, user }) {
   const userParam = encodeURIComponent(Buffer.from(JSON.stringify(user)).toString("base64url"));
-  return `${env.google.frontendUrl}/auth/callback#token=${encodeURIComponent(token)}&user=${userParam}`;
+  return `${frontendUrlBase()}/auth/callback#token=${encodeURIComponent(token)}&user=${userParam}`;
 }
 
 export const register = asyncHandler(async (req, res) => {
@@ -101,7 +107,7 @@ function googleFailRedirect(reason, err) {
   logger.error(`Google sign-in failed (${reason})`, err);
   const params = new URLSearchParams({ google: "error" });
   if (!env.isProduction && reason) params.set("reason", reason);
-  return `${env.google.frontendUrl}/login?${params.toString()}`;
+  return `${frontendUrlBase()}/login?${params.toString()}`;
 }
 
 export const googleCallback = asyncHandler(async (req, res) => {

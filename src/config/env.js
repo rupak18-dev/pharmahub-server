@@ -82,7 +82,7 @@ export const env = {
         : "http://localhost:5000/api/v1/auth/google/callback"),
     frontendUrl:
       process.env.FRONTEND_URL ??
-      (isProduction ? "https://pharmahub-co.vercel.app" : "http://localhost:5100"),
+      (isProduction ? "https://pharmahub-co.vercel.app" : "http://localhost:8080"),
     stateCookieName: "google_oauth_state",
   },
 
