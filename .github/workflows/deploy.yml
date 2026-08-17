@@ -1,9 +1,14 @@
-name: Deploy API to production
+name: CI
 
 on:
   push:
     branches:
       - main
+      - Test
+  pull_request:
+    branches:
+      - main
+      - Test
 
 jobs:
   ci:
@@ -16,8 +21,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: '22'
-          cache: 'npm'
+          node-version: "22"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
@@ -27,11 +32,3 @@ jobs:
 
       - name: Test
         run: npm test
-
-  deploy:
-    needs: ci
-    runs-on: ubuntu-latest
-    environment: Production
-    steps:
-      - name: Deploy to Render
-        run: echo "Render auto-deploys from main via GitHub integration. Manual deploys via Render dashboard."
