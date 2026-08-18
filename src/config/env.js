@@ -28,8 +28,6 @@ if (isProduction && !mongoUri) {
   );
 }
 
-const isProduction = process.env.NODE_ENV === "production";
-
 if (isProduction) {
   if (!process.env.JWT_SECRET || process.env.JWT_SECRET === "dev-only-change-me") {
     throw new Error(
