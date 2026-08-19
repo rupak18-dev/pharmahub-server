@@ -8,6 +8,7 @@ const userSchema = new Schema(
     role: { type: String, required: true, default: "Pharmacist", index: true },
     orgName: { type: String, trim: true },
     active: { type: Boolean, default: true },
+    onboarded: { type: Boolean, default: true },
   },
   {
     timestamps: true,

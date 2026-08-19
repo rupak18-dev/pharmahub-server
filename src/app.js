@@ -15,7 +15,7 @@ export function createApp() {
 
   app.disable("x-powered-by");
   app.use(helmet());
-  app.use(cors({ origin: env.corsOrigin === "*" ? true : env.corsOrigin }));
+  app.use(cors({ origin: env.corsOrigin === "*" ? true : env.corsOrigin, credentials: true })); // trigger restart 2
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: true }));
 

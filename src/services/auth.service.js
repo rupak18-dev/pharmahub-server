@@ -19,6 +19,7 @@ export async function registerUser({ name, email, password, orgName }) {
     passwordHash,
     role: "Pharmacist",
     orgName,
+    onboarded: false,
   });
 
   return { user: toPublicUser(user) };
@@ -53,7 +54,20 @@ export async function changePassword(userId, { currentPassword, newPassword }) {
   return true;
 }
 
-function signToken(userId) {
+export async function updateUserProfile(userId, data) {
+  const user = await User.findById(userId);
+  if (!user) throw ApiError.notFound("User not found");
+
+  if (data.name !== undefined) user.name = data.name;
+  if (data.role !== undefined) user.role = data.role;
+  if (data.orgName !== undefined) user.orgName = data.orgName;
+  if (data.onboarded !== undefined) user.onboarded = data.onboarded;
+  
+  await user.save();
+  return toPublicUser(user);
+}
+
+export function signToken(userId) {
   return jwt.sign({ sub: String(userId) }, env.jwtSecret, {
     expiresIn: env.jwtExpiresIn,
   });
@@ -67,6 +81,7 @@ export function toPublicUser(user) {
     role: user.role,
     orgName: user.orgName,
     active: user.active,
+    onboarded: user.onboarded ?? true,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
