@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { getServers, setServers } from "node:dns";
 
 import { env } from "./env.js";
+import { logger } from "../core/logger.js";
 
 function ensureWorkingDns() {
   const servers = getServers();
@@ -15,13 +16,13 @@ export async function connectDB() {
   ensureWorkingDns();
   mongoose.set("strictQuery", true);
   mongoose.connection.on("connected", () => {
-    console.log(`[db] connected to MongoDB (${mongoose.connection.name})`);
+    logger.info(`[db] connected to MongoDB (${mongoose.connection.name})`);
   });
   mongoose.connection.on("error", (err) => {
-    console.error(`[db] connection error: ${err.message}`);
+    logger.error(`[db] connection error: ${err.message}`);
   });
   mongoose.connection.on("disconnected", () => {
-    console.warn("[db] disconnected from MongoDB");
+    logger.warn("[db] disconnected from MongoDB");
   });
 
   await mongoose.connect(env.mongoUri, {

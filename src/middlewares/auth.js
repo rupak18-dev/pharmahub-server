@@ -13,7 +13,7 @@ export const auth = asyncHandler(async (req, _res, next) => {
 
   let payload;
   try {
-    payload = jwt.verify(token, env.jwtSecret);
+    payload = jwt.verify(token, env.jwtSecret, { algorithms: ["HS256"] });
   } catch {
     throw ApiError.unauthorized("Invalid or expired token");
   }

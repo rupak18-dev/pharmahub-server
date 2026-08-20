@@ -122,7 +122,6 @@ export const authSchemas = {
     name: z.string().trim().max(120).optional(),
     email: emailSchema,
     password: passwordSchema,
-    role: z.string().trim().optional(),
     orgName: z.string().trim().optional(),
   }),
   login: z.object({
@@ -131,7 +130,7 @@ export const authSchemas = {
   }),
   profile: z.object({
     name: z.string().trim().min(1, "Name is required").max(120).optional(),
-    role: z.string().trim().min(1, "Role is required").optional(),
+    role: z.enum(["Owner", "Admin", "Pharmacist", "Cashier", "Store Keeper", "Inventory Manager"]).optional(),
     orgName: z.string().trim().max(120).optional(),
     onboarded: z.boolean().optional(),
   }),

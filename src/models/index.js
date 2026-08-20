@@ -12,3 +12,5 @@ export { Purchase } from "./Purchase.js";
 export { Sale } from "./Sale.js";
 export { AuditLog } from "./AuditLog.js";
 export { Notification } from "./Notification.js";
+export { Otp } from "./Otp.js";
+export { Onboarding } from "./Onboarding.js";

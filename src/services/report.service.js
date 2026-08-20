@@ -11,43 +11,68 @@ const startOfDay = (d) => {
 };
 
 export async function salesReport({ from, to, groupBy = "day" }) {
-  const match = {};
+  const match = { status: "completed" };
   if (from || to) {
     match.createdAt = {};
     if (from) match.createdAt.$gte = startOfDay(new Date(from));
     if (to) match.createdAt.$lte = new Date(to);
   }
-  const sales = await Sale.find({ ...match, status: "completed" }).sort({ createdAt: 1 }).lean();
 
-  const buckets = new Map();
-  const keyOf = {
-    day: (d) => d.toISOString().slice(0, 10),
-    month: (d) => d.toISOString().slice(0, 7),
-    year: (d) => String(d.getUTCFullYear()),
-  }[groupBy] ?? ((d) => d.toISOString().slice(0, 10));
+  const dateFormat = {
+    day: "%Y-%m-%d",
+    month: "%Y-%m",
+    year: "%Y",
+  }[groupBy] ?? "%Y-%m-%d";
 
-  for (const s of sales) {
-    const key = keyOf(new Date(s.createdAt));
-    const bucket = buckets.get(key) ?? { period: key, invoices: 0, units: 0, sales: 0, gst: 0, items: 0 };
-    bucket.invoices += 1;
-    bucket.units += s.items.reduce((acc, i) => acc + i.quantity, 0);
-    bucket.sales += s.grandTotal;
-    bucket.gst += s.gstTotal;
-    bucket.items += s.items.length;
-    buckets.set(key, bucket);
-  }
+  const [aggResult, summaryResult] = await Promise.all([
+    Sale.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: { $dateToString: { format: dateFormat, date: "$createdAt" } },
+          invoices: { $sum: 1 },
+          units: { $sum: { $sum: "$items.quantity" } },
+          sales: { $sum: "$grandTotal" },
+          gst: { $sum: "$gstTotal" },
+          items: { $sum: { $size: "$items" } },
+        },
+      },
+      { $sort: { _id: 1 } },
+      {
+        $project: {
+          _id: 0,
+          period: "$_id",
+          invoices: 1,
+          units: 1,
+          sales: 1,
+          gst: 1,
+          items: 1,
+        },
+      },
+    ]),
+    Sale.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: "$grandTotal" },
+          totalInvoices: { $sum: 1 },
+          totalUnits: { $sum: { $sum: "$items.quantity" } },
+          totalGst: { $sum: "$gstTotal" },
+        },
+      },
+    ]),
+  ]);
+
+  const summary = summaryResult[0] ?? { totalSales: 0, totalInvoices: 0, totalUnits: 0, totalGst: 0 };
+  delete summary._id;
 
   return {
     from,
     to,
     groupBy,
-    summary: {
-      totalSales: sales.reduce((s, x) => s + x.grandTotal, 0),
-      totalInvoices: sales.length,
-      totalUnits: sales.reduce((s, x) => s + x.items.reduce((a, i) => a + i.quantity, 0), 0),
-      totalGst: sales.reduce((s, x) => s + x.gstTotal, 0),
-    },
-    series: [...buckets.values()],
+    summary,
+    series: aggResult,
   };
 }
 

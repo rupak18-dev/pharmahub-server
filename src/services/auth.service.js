@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
 import { env } from "../config/env.js";
+import { constants } from "../config/constants.js";
 import { ApiError } from "../core/ApiError.js";
 import { User } from "../models/User.js";
 
@@ -30,7 +31,12 @@ export async function updateProfile(userId, { name, role, orgName, onboarded }) 
   if (!user) throw ApiError.notFound("User not found");
 
   if (name !== undefined) user.name = name.trim();
-  if (role !== undefined) user.role = role.trim();
+  if (role !== undefined) {
+    if (!constants.roles.includes(role.trim())) {
+      throw ApiError.badRequest(`Invalid role. Must be one of: ${constants.roles.join(", ")}`);
+    }
+    user.role = role.trim();
+  }
   if (orgName !== undefined) user.orgName = orgName?.trim() ?? null;
   if (onboarded !== undefined) user.onboarded = onboarded;
 
@@ -103,6 +109,7 @@ export async function signUpWithGoogle({ googleId, email, name, picture }) {
     picture: picture ?? null,
     googleId,
     provider: "google",
+    role: "Pharmacist",
     onboarded: false,
   });
 
@@ -128,6 +135,8 @@ export async function changePassword(userId, { currentPassword, newPassword }) {
 
 function signToken(userId) {
   return jwt.sign({ sub: String(userId) }, env.jwtSecret, {
+    algorithm: "HS256",
+    issuer: "pharmahub",
     expiresIn: env.jwtExpiresIn,
   });
 }

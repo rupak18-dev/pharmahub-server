@@ -285,7 +285,8 @@ async function run() {
     });
     batchCount += 1;
 
-    await Batch.create({
+    const secondQty = Math.max(0, Math.round(stockQty / 3));
+    const secondBatch = await Batch.create({
       medicineId: med._id,
       batchNumber: `${med.prefix}-${String(new Date().getFullYear()).slice(-2)}02-${String(i + 1).padStart(2, "0")}`,
       batchType: "C",
@@ -303,7 +304,7 @@ async function run() {
       status: { isRecalled: false, state: "ACTIVE", quarantineReason: null },
       stock: {
         uom: "Units",
-        quantityOnHand: Math.max(0, Math.round(stockQty / 3)),
+        quantityOnHand: secondQty,
         reservedQuantity: 0,
         quarantined: 0,
       },
@@ -319,7 +320,7 @@ async function run() {
           id: randomUUID(),
           type: "created",
           note: "Batch seeded",
-          qty: Math.max(0, Math.round(stockQty / 3)),
+          qty: secondQty,
           timestamp: new Date(),
           by: "seed",
         },
@@ -332,6 +333,14 @@ async function run() {
       locationType: locationPool[i % locationPool.length],
       rackCode: rackPool[i % rackPool.length],
       quantityOnHand: stockQty,
+      reservedQuantity: 0,
+    });
+
+    await InventoryItem.create({
+      batchId: secondBatch._id,
+      locationType: locationPool[(i + 1) % locationPool.length],
+      rackCode: rackPool[(i + 1) % rackPool.length],
+      quantityOnHand: secondQty,
       reservedQuantity: 0,
     });
   }

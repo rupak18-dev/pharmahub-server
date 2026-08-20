@@ -5,7 +5,7 @@ import { Batch } from "../models/Batch.js";
 import { InventoryItem } from "../models/InventoryItem.js";
 import { Medicine } from "../models/Medicine.js";
 import { Sale } from "../models/Sale.js";
-import { removeStock } from "./inventory.service.js";
+import { addStock, removeStock } from "./inventory.service.js";
 import { generateInvoiceNo } from "../utils/id.js";
 import { round2 } from "../utils/date.js";
 
@@ -174,12 +174,14 @@ export async function voidSale(saleId, reason, userId, userName) {
       for (const item of sale.items) {
         const batch = await Batch.findById(item.batchId).session(session);
         if (!batch) continue;
-        await removeStock({
+        const existingItem = await InventoryItem.findOne({
           batchId: batch._id,
-          locationType: null,
-          rackCode: null,
+        }).session(session);
+        await addStock({
+          batchId: batch._id,
+          locationType: existingItem?.locationType ?? null,
+          rackCode: existingItem?.rackCode ?? null,
           quantity: item.quantity,
-          movementType: "Sales Outward",
           referenceDocId: sale._id,
           userId,
           userName,
