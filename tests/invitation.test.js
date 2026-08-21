@@ -12,10 +12,19 @@ import {
   listUsers,
 } from "../src/controllers/user.controller.js";
 
-test("End-to-End Staff Invitation Flow", async (t) => {
-  if (mongoose.connection.readyState === 0) {
-    await mongoose.connect(env.mongoUri);
-  }
+const uri = process.env.MONGO_URI_TEST ?? env.mongoUri;
+let connected = false;
+try {
+  await mongoose.connect(uri, { serverSelectionTimeoutMS: 4000 });
+  connected = true;
+} catch (err) {
+  console.log(`[test] MongoDB unavailable (${err?.message ?? err}); invitation tests skipped`);
+}
+
+test(
+  "End-to-End Staff Invitation Flow",
+  { skip: !connected && "MongoDB not available - skipped" },
+  async (t) => {
 
   const owner = await User.findOne({ role: "Owner" });
   assert.ok(owner, "Expected at least one Owner in the database");
@@ -182,4 +191,5 @@ test("End-to-End Staff Invitation Flow", async (t) => {
   await User.deleteOne({ email: testEmail });
   await Invitation.deleteOne({ email: testEmail });
   await mongoose.disconnect();
-});
+  },
+);
