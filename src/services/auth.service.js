@@ -5,6 +5,7 @@ import { env } from "../config/env.js";
 import { constants } from "../config/constants.js";
 import { ApiError } from "../core/ApiError.js";
 import { User } from "../models/User.js";
+import { verifyOtp } from "./otp.service.js";
 
 export async function registerUser({ name, email, password, orgName }) {
   const normalizedEmail = email.toLowerCase();
@@ -133,6 +134,25 @@ export async function changePassword(userId, { currentPassword, newPassword }) {
   return true;
 }
 
+/**
+ * Completes a forgot-password flow: consumes the emailed OTP, then sets the
+ * new password. Google-created accounts may set their first password here.
+ * Returns the user id for audit logging.
+ */
+export async function resetPassword({ email, code, newPassword }) {
+  await verifyOtp({ email, purpose: "password_reset", code });
+  const user = await User.findOne({ email: email.toLowerCase() }).collation({
+    locale: "en",
+    strength: 2,
+  });
+  if (!user || !user.active) throw ApiError.badRequest("No account found for this email");
+
+  user.passwordHash = await bcrypt.hash(newPassword, 10);
+  user.provider = "email";
+  await user.save();
+  return String(user._id);
+}
+
 function signToken(userId) {
   return jwt.sign({ sub: String(userId) }, env.jwtSecret, {
     algorithm: "HS256",
@@ -148,11 +168,14 @@ const SESSION_COOKIE_OPTIONS = {
   path: "/",
 };
 
-export function setSessionCookie(res, token) {
-  res.cookie(env.cookie.name, token, {
-    ...SESSION_COOKIE_OPTIONS,
-    maxAge: env.cookie.maxAgeDays * 24 * 60 * 60 * 1000,
-  });
+export function setSessionCookie(res, token, { remember = true } = {}) {
+  const options = { ...SESSION_COOKIE_OPTIONS };
+  // remember=false → browser-session cookie (no Max-Age): signing in ends when
+  // the browser closes, matching the frontend's sessionStorage choice.
+  if (remember !== false) {
+    options.maxAge = env.cookie.maxAgeDays * 24 * 60 * 60 * 1000;
+  }
+  res.cookie(env.cookie.name, token, options);
 }
 
 export function clearSessionCookie(res) {

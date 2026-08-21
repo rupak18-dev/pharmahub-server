@@ -13,6 +13,16 @@ router.post("/logout", authController.logout);
 router.get("/me", auth, authController.me);
 router.put("/profile", auth, validate(authSchemas.profile), authController.updateMyProfile);
 router.post("/change-password", auth, validate(authSchemas.changePassword), authController.updatePassword);
+router.post(
+  "/forgot-password",
+  validate(authSchemas.forgotPassword),
+  authController.forgotPassword,
+);
+router.post(
+  "/reset-password",
+  validate(authSchemas.resetPassword),
+  authController.resetPassword,
+);
 
 router.get("/google", authController.googleStart);
 router.get("/google/callback", authController.googleCallback);
