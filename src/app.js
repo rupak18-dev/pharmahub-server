@@ -3,6 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
+import cookieParser from "cookie-parser";
 
 import { env } from "./config/env.js";
 import { constants } from "./config/constants.js";
@@ -14,6 +15,7 @@ export function createApp() {
   const app = express();
 
   app.disable("x-powered-by");
+  app.use(cookieParser());
   app.use(
     helmet({
       contentSecurityPolicy: false,

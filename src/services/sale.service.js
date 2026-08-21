@@ -35,8 +35,12 @@ export async function createSale({
         const med = medMap.get(String(line.medicineId));
         if (!med) throw ApiError.badRequest(`Unknown medicine ${line.medicineId}`);
 
-        const candidates = await Batch.find({ medicineId: med._id, status: { $ne: "expired" } })
-          .sort({ expiryDate: 1 })
+        const candidates = await Batch.find({
+          medicineId: med._id,
+          "status.state": { $nin: ["RECALLED", "RETIRED", "BLOCKED", "QUARANTINED"] },
+          "dates.expiryDate": { $gt: new Date() },
+        })
+          .sort({ "dates.expiryDate": 1 })
           .session(session);
         const locations = await InventoryItem.find({
           batchId: { $in: candidates.map((b) => b._id) },
@@ -77,7 +81,7 @@ export async function createSale({
               userName: createdByName,
               note: "Sales outward",
             });
-            const unit = batch.sellingPrice ?? 0;
+            const unit = batch.pricing.sellingPrice ?? 0;
             const gross = unit * takeFromLoc;
             const discount = (gross * (line.discountPct ?? 0)) / 100;
             const net = gross - discount;
@@ -109,7 +113,7 @@ export async function createSale({
               userName: createdByName,
               note: "Sales outward",
             });
-            const unit = batch.sellingPrice ?? 0;
+            const unit = batch.pricing.sellingPrice ?? 0;
             const gross = unit * take;
             const discount = (gross * (line.discountPct ?? 0)) / 100;
             const net = gross - discount;

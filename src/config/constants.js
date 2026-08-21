@@ -26,7 +26,9 @@ export const constants = {
     nearExpiryStatus: "near_expiry",
   },
 
-  batchStatuses: ["active", "near_expiry", "expired", "quarantined"],
+  batchStatuses: ["active", "near_expiry", "expired", "quarantined", "blocked", "recalled", "retired"],
+
+  manualStatuses: ["quarantined", "blocked", "recalled", "retired"],
 
   locationTypes: ["Front Shelf", "Backroom", "Cold Storage", "Quarantine"],
 

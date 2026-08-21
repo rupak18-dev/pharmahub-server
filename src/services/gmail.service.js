@@ -83,7 +83,7 @@ export function verifyOAuthState(state) {
  * Gmail account. Scope is send-only (gmail.send) — never read/modify.
  */
 export function buildAuthorizationUrl(user) {
-  const google = googleConfig();
+  const google = googleConfig;
   if (!isGoogleConfigured()) {
     logger.warn(
       "Gmail connection attempted but Google OAuth is not configured on this server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI are missing or empty).",
@@ -124,7 +124,7 @@ async function googleFetch(url, options, fetchImpl) {
 }
 
 export async function exchangeCodeForTokens(code, fetchImpl) {
-  const google = googleConfig();
+  const google = googleConfig;
   if (!isGoogleConfigured()) {
     logger.warn(
       "Gmail OAuth callback received but Google OAuth is not configured on this server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI are missing or empty).",
@@ -159,7 +159,7 @@ export async function exchangeCodeForTokens(code, fetchImpl) {
 }
 
 export async function refreshAccessToken(refreshToken, fetchImpl) {
-  const google = googleConfig();
+  const google = googleConfig;
   const body = new URLSearchParams({
     refresh_token: refreshToken,
     client_id: google.clientId,

@@ -37,7 +37,7 @@ export async function addStock({
         { new: true, session },
       );
 
-      batch.currentStock += quantity;
+      batch.stock.quantityOnHand += quantity;
       await batch.save({ session });
 
       await InventoryLedger.create(
@@ -103,7 +103,7 @@ export async function removeStock({
         { new: true, session },
       );
 
-      await Batch.findByIdAndUpdate(batchId, { $inc: { currentStock: -quantity } }, { session });
+      await Batch.findByIdAndUpdate(batchId, { $inc: { "stock.quantityOnHand": -quantity } }, { session });
       await InventoryLedger.create(
         [
           {
@@ -158,7 +158,7 @@ export async function adjustStock({ batchId, newQuantity, reason, userId, userNa
         { new: true, session },
       );
 
-      batch.currentStock = Math.max(0, batch.currentStock + delta);
+      batch.stock.quantityOnHand = Math.max(0, batch.stock.quantityOnHand + delta);
       await batch.save({ session });
 
       await InventoryLedger.create(

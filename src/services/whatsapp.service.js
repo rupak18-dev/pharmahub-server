@@ -83,7 +83,7 @@ async function prepareBillDocument(bill, publicUrl) {
 }
 
 function buildMessagePayload(bill, to, document, caption, orgName) {
-  const cfg = whatsAppConfig();
+  const cfg = whatsAppConfig;
   if (cfg.templateName) {
     // Business-initiated conversations can require an approved template.
     return {
@@ -123,7 +123,7 @@ function buildMessagePayload(bill, to, document, caption, orgName) {
 }
 
 async function callMetaApi(payload) {
-  const cfg = whatsAppConfig();
+  const cfg = whatsAppConfig;
   const url = `https://graph.facebook.com/${cfg.graphVersion}/${cfg.phoneNumberId}/messages`;
   const res = await fetch(url, {
     method: "POST",
@@ -238,7 +238,7 @@ export async function deliverBillToWhatsApp({ bill, user }) {
   }
 
   summary.attempted = true;
-  const cfg = whatsAppConfig();
+  const cfg = whatsAppConfig;
   logger.info(`[WhatsApp] Sender Phone Number ID configured: ${cfg.phoneNumberId}`);
   const previous = bill.whatsappDelivery ?? {};
   const attempts = Number(previous.attempts ?? 0) + 1;

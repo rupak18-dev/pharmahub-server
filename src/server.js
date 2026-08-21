@@ -9,6 +9,13 @@ import { validateEmailConfig } from "./services/mailer.js";
 
 async function bootstrap() {
   try {
+    if (!env.mongoUriConfigured) {
+      throw new Error(
+        "MONGO_URI is not set. Add it to the environment (Render dashboard > your service > " +
+          "Environment > add MONGO_URI with your MongoDB connection string) and redeploy.",
+      );
+    }
+
     await connectDB();
     await Role.ensureSystemRoles();
     await ensureDevelopmentUser();

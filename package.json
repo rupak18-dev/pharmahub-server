@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "kill:port": "node scripts/kill-port.js",
     "seed": "node scripts/seed.js",
+    "migrate:batches": "node scripts/migrate-batches.js",
     "test": "node --test \"tests/*.test.js\"",
     "lint": "eslint src tests scripts"
   },
@@ -25,18 +27,25 @@
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
+    "google-auth-library": "^11.0.2",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.9.5",
     "morgan": "^1.10.0",
-    "multer": "^2.2.0",
-    "node-cron": "^4.6.0",
-    "nodemailer": "^9.0.5",
-    "tesseract.js": "^7.0.0",
+
+"multer": "^2.2.0",
+"node-cron": "^4.6.0",
+"nodemailer": "^9.0.5",
+"resend": "^6.20.0",
+"tesseract.js": "^7.0.0",
+
+    "resend": "^6.20.0",
+
     "zod": "^3.24.1"
   },
   "devDependencies": {
