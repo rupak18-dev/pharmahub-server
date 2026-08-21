@@ -44,83 +44,92 @@ async function request(path, { method = "GET", body, token } = {}) {
   });
 }
 
-describe("full API flow (requires MongoDB)", { skip: !connected && "MongoDB not available - skipped" }, () => {
-  const email = `test-${Date.now()}@pharmahub.demo`;
+describe(
+  "full API flow (requires MongoDB)",
+  { skip: !connected && "MongoDB not available - skipped" },
+  () => {
+    const email = `test-${Date.now()}@pharmahub.demo`;
 
-  test("login with invalid credentials returns 401", async () => {
-    const res = await request("/auth/login", {
-      method: "POST",
-      body: { email: "nobody@example.com", password: "wrongpass" },
+    test("login with invalid credentials returns 401", async () => {
+      const res = await request("/auth/login", {
+        method: "POST",
+        body: { email: "nobody@example.com", password: "wrongpass" },
+      });
+      assert.equal(res.status, 401);
     });
-    assert.equal(res.status, 401);
-  });
 
-  test("register a new user", async () => {
-    const res = await request("/auth/register", {
-      method: "POST",
-      body: { name: "Integration Tester", email, password: "password123" },
+    test("register a new user", async () => {
+      const res = await request("/auth/register", {
+        method: "POST",
+        body: { name: "Integration Tester", email, password: "password123" },
+      });
+      assert.equal(res.status, 201);
     });
-    assert.equal(res.status, 201);
-  });
 
-  let token;
-  test("login as the new user", async () => {
-    const res = await request("/auth/login", {
-      method: "POST",
-      body: { email, password: "password123" },
+    let token;
+    test("login as the new user", async () => {
+      const res = await request("/auth/login", {
+        method: "POST",
+        body: { email, password: "password123" },
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      token = body.data.token;
+      assert.ok(token);
+      assert.equal(body.data.user.role, "Pharmacist");
     });
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    token = body.data.token;
-    assert.ok(token);
-    assert.equal(body.data.user.role, "Pharmacist");
-  });
 
-  test("get current user via /auth/me", async () => {
-    const res = await request("/auth/me", { token });
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(body.data.email, email);
-  });
-
-  test("create a category with the token", async () => {
-    // Promote the test user to Admin so the category creation is permitted.
-    await User.updateOne({ email }, { $set: { role: "Admin" } });
-    const res = await request("/categories", {
-      method: "POST",
-      token,
-      body: { name: `Cat-${Date.now()}` },
+    test("get current user via /auth/me", async () => {
+      const res = await request("/auth/me", { token });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.data.email, email);
     });
-    assert.equal(res.status, 201);
-  });
 
-  test("read-only role (Cashier) is denied medicine creation", async () => {
-    const cashierEmail = `c-${Date.now()}@pharmahub.demo`;
-    const created = await request("/users", {
-      method: "POST",
-      token,
-      body: { name: "Test Cashier", email: cashierEmail, password: "password123", role: "Cashier" },
+    test("create a category with the token", async () => {
+      // Promote the test user to Admin so the category creation is permitted.
+      await User.updateOne({ email }, { $set: { role: "Admin" } });
+      const res = await request("/categories", {
+        method: "POST",
+        token,
+        body: { name: `Cat-${Date.now()}` },
+      });
+      assert.equal(res.status, 201);
     });
-    assert.equal(created.status, 201);
 
-    const login = await request("/auth/login", {
-      method: "POST",
-      body: { email: cashierEmail, password: "password123" },
+    test("read-only role (Cashier) is denied medicine creation", async () => {
+      const cashierEmail = `c-${Date.now()}@pharmahub.demo`;
+      const created = await request("/users", {
+        method: "POST",
+        token,
+        body: {
+          name: "Test Cashier",
+          email: cashierEmail,
+          password: "password123",
+          role: "Cashier",
+        },
+      });
+      assert.equal(created.status, 201);
+
+      const login = await request("/auth/login", {
+        method: "POST",
+        body: { email: cashierEmail, password: "password123" },
+      });
+      const cashierToken = (await login.json()).data.token;
+
+      const res = await request("/medicines", {
+        method: "POST",
+        token: cashierToken,
+        body: { name: "Should Not Exist" },
+      });
+      assert.equal(res.status, 403);
     });
-    const cashierToken = (await login.json()).data.token;
 
-    const res = await request("/medicines", {
-      method: "POST",
-      token: cashierToken,
-      body: { name: "Should Not Exist" },
+    test("list medicines (Pharmacist has view access)", async () => {
+      const res = await request("/medicines", { token });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(Array.isArray(body.data), true);
     });
-    assert.equal(res.status, 403);
-  });
-
-  test("list medicines (Pharmacist has view access)", async () => {
-    const res = await request("/medicines", { token });
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(Array.isArray(body.data), true);
-  });
-});
+  },
+);

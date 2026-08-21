@@ -44,13 +44,27 @@ export const createPurchase = asyncHandler(async (req, res) => {
     createdBy: req.user?._id,
     createdByName: req.user?.name,
   });
-  recordAudit({ userId: req.user?._id, userName: req.user?.name, action: "Purchase order created", entityType: "purchase", entityId: item._id, ip: req.ip });
+  recordAudit({
+    userId: req.user?._id,
+    userName: req.user?.name,
+    action: "Purchase order created",
+    entityType: "purchase",
+    entityId: item._id,
+    ip: req.ip,
+  });
   return created(res, item, "Purchase order created");
 });
 
 export const receive = asyncHandler(async (req, res) => {
   const result = await receivePurchase(req.params.id, req.body, req.user?._id, req.user?.name);
-  recordAudit({ userId: req.user?._id, userName: req.user?.name, action: "Purchase received (GRN)", entityType: "purchase", entityId: req.params.id, ip: req.ip });
+  recordAudit({
+    userId: req.user?._id,
+    userName: req.user?.name,
+    action: "Purchase received (GRN)",
+    entityType: "purchase",
+    entityId: req.params.id,
+    ip: req.ip,
+  });
   return ok(res, result, "Purchase received");
 });
 

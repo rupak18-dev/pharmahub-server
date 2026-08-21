@@ -14,6 +14,11 @@ router.get("/", authorize("notifications", "view"), notificationController.listN
 router.get("/unread-count", authorize("notifications", "view"), notificationController.unreadCount);
 router.get("/:id", authorize("notifications", "view"), notificationController.getNotification);
 router.post("/", authorize("notifications", "create"), notificationController.createNotification);
-router.patch("/read", authorize("notifications", "update"), validate(notificationSchemas.markRead), notificationController.markRead);
+router.patch(
+  "/read",
+  authorize("notifications", "update"),
+  validate(notificationSchemas.markRead),
+  notificationController.markRead,
+);
 
 export default router;

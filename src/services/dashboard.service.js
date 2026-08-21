@@ -20,7 +20,9 @@ export async function dashboardStats() {
       Sale.find({ status: "completed", createdAt: { $gte: today, $lt: tomorrow } }).lean(),
       Sale.find({ status: "completed", createdAt: { $gte: weekAgo } }).lean(),
       Medicine.find({ isActive: true }).lean(),
-      Batch.find({ expiryDate: { $gt: new Date(), $lte: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000) } }).lean(),
+      Batch.find({
+        expiryDate: { $gt: new Date(), $lte: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000) },
+      }).lean(),
       Batch.countDocuments({ expiryDate: { $lt: new Date() } }),
       Medicine.countDocuments(),
       Purchase.countDocuments(),
@@ -29,13 +31,24 @@ export async function dashboardStats() {
   const batches = await Batch.find({}).lean();
   const stockByMedicine = new Map();
   for (const b of batches) {
-    stockByMedicine.set(String(b.medicineId), (stockByMedicine.get(String(b.medicineId)) ?? 0) + (b.currentStock ?? 0));
+    stockByMedicine.set(
+      String(b.medicineId),
+      (stockByMedicine.get(String(b.medicineId)) ?? 0) + (b.currentStock ?? 0),
+    );
   }
-  const lowStockList = lowStock.filter((m) => (stockByMedicine.get(String(m._id)) ?? 0) <= m.reorderThreshold);
+  const lowStockList = lowStock.filter(
+    (m) => (stockByMedicine.get(String(m._id)) ?? 0) <= m.reorderThreshold,
+  );
 
   const totalStock = batches.reduce((s, b) => s + (b.currentStock ?? 0), 0);
-  const stockValue = batches.reduce((s, b) => s + (b.currentStock ?? 0) * (b.purchasePrice ?? 0), 0);
-  const totalUnitsSoldToday = todaySales.reduce((s, x) => s + x.items.reduce((a, i) => a + i.quantity, 0), 0);
+  const stockValue = batches.reduce(
+    (s, b) => s + (b.currentStock ?? 0) * (b.purchasePrice ?? 0),
+    0,
+  );
+  const totalUnitsSoldToday = todaySales.reduce(
+    (s, x) => s + x.items.reduce((a, i) => a + i.quantity, 0),
+    0,
+  );
 
   const daily = [];
   for (let i = 6; i >= 0; i -= 1) {
@@ -125,7 +138,10 @@ export async function getDashboardNotifications(limit = 20) {
   }
   notifications.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-  const stored = await Notification.find({ userId: null }).sort({ createdAt: -1 }).limit(limit).lean();
+  const stored = await Notification.find({ userId: null })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .lean();
   const storedMapped = stored.map((n) => ({ ...n, _id: undefined }));
   const merged = [...storedMapped, ...notifications];
   const seen = new Set();
@@ -144,7 +160,10 @@ async function getLowStockList(limit = 50) {
   const batches = await Batch.find({}).lean();
   const stockByMedicine = new Map();
   for (const b of batches) {
-    stockByMedicine.set(String(b.medicineId), (stockByMedicine.get(String(b.medicineId)) ?? 0) + (b.currentStock ?? 0));
+    stockByMedicine.set(
+      String(b.medicineId),
+      (stockByMedicine.get(String(b.medicineId)) ?? 0) + (b.currentStock ?? 0),
+    );
   }
   const list = medicines
     .filter((m) => (stockByMedicine.get(String(m._id)) ?? 0) <= m.reorderThreshold)

@@ -46,15 +46,35 @@ export const getMedicine = asyncHandler(async (req, res) => {
 });
 
 export const createMedicine = asyncHandler(async (req, res) => {
-  const item = await Medicine.create({ ...req.body, barcode: req.body.barcode ?? generateBarcode() });
-  recordAudit({ userId: req.user?._id, userName: req.user?.name, action: "Medicine created", entityType: "medicine", entityId: item._id, ip: req.ip });
+  const item = await Medicine.create({
+    ...req.body,
+    barcode: req.body.barcode ?? generateBarcode(),
+  });
+  recordAudit({
+    userId: req.user?._id,
+    userName: req.user?.name,
+    action: "Medicine created",
+    entityType: "medicine",
+    entityId: item._id,
+    ip: req.ip,
+  });
   return created(res, item, "Medicine created");
 });
 
 export const updateMedicine = asyncHandler(async (req, res) => {
-  const item = await Medicine.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+  const item = await Medicine.findByIdAndUpdate(req.params.id, req.body, {
+    new: true,
+    runValidators: true,
+  });
   if (!item) throw ApiError.notFound("Medicine not found");
-  recordAudit({ userId: req.user?._id, userName: req.user?.name, action: "Medicine updated", entityType: "medicine", entityId: item._id, ip: req.ip });
+  recordAudit({
+    userId: req.user?._id,
+    userName: req.user?.name,
+    action: "Medicine updated",
+    entityType: "medicine",
+    entityId: item._id,
+    ip: req.ip,
+  });
   return ok(res, item, "Medicine updated");
 });
 

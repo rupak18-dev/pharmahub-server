@@ -17,7 +17,10 @@ export const listInventory = asyncHandler(async (req, res) => {
 
   const [items, total] = await Promise.all([
     InventoryItem.find(filter)
-      .populate({ path: "batchId", populate: { path: "medicineId", select: "name genericName brandName" } })
+      .populate({
+        path: "batchId",
+        populate: { path: "medicineId", select: "name genericName brandName" },
+      })
       .skip(skip)
       .limit(limit)
       .lean(),
@@ -37,7 +40,14 @@ export const addStockToBatch = asyncHandler(async (req, res) => {
     userId: req.user?._id,
     userName: req.user?.name,
   });
-  recordAudit({ userId: req.user?._id, userName: req.user?.name, action: "Stock added", entityType: "batch", entityId: req.body.batchId, ip: req.ip });
+  recordAudit({
+    userId: req.user?._id,
+    userName: req.user?.name,
+    action: "Stock added",
+    entityType: "batch",
+    entityId: req.body.batchId,
+    ip: req.ip,
+  });
   return created(res, item, "Stock added");
 });
 
@@ -49,16 +59,36 @@ export const adjustStockLevel = asyncHandler(async (req, res) => {
     userId: req.user?._id,
     userName: req.user?.name,
   });
-  recordAudit({ userId: req.user?._id, userName: req.user?.name, action: "Stock adjusted", entityType: "batch", entityId: req.body.batchId, ip: req.ip });
+  recordAudit({
+    userId: req.user?._id,
+    userName: req.user?.name,
+    action: "Stock adjusted",
+    entityType: "batch",
+    entityId: req.body.batchId,
+    ip: req.ip,
+  });
   return ok(res, item, "Stock adjusted");
 });
 
 export const recordMovement = asyncHandler(async (req, res) => {
   const { movementType, quantityChange, ...rest } = req.body;
   if (quantityChange > 0) {
-    await addStock({ ...rest, quantity: quantityChange, userId: req.user?._id, userName: req.user?.name, note: req.body.note ?? movementType });
+    await addStock({
+      ...rest,
+      quantity: quantityChange,
+      userId: req.user?._id,
+      userName: req.user?.name,
+      note: req.body.note ?? movementType,
+    });
   } else {
-    await removeStock({ ...rest, quantity: Math.abs(quantityChange), movementType, userId: req.user?._id, userName: req.user?.name, note: req.body.note ?? movementType });
+    await removeStock({
+      ...rest,
+      quantity: Math.abs(quantityChange),
+      movementType,
+      userId: req.user?._id,
+      userName: req.user?.name,
+      note: req.body.note ?? movementType,
+    });
   }
   return created(res, null, "Movement recorded");
 });

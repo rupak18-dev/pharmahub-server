@@ -14,3 +14,8 @@ export { AuditLog } from "./AuditLog.js";
 export { Notification } from "./Notification.js";
 export { SavedReport } from "./SavedReport.js";
 export { ScheduledReport } from "./ScheduledReport.js";
+export { Invitation } from "./Invitation.js";
+export { PasswordResetToken } from "./PasswordResetToken.js";
+export { ReportBill } from "./ReportBill.js";
+export { Integration } from "./Integration.js";
+export { DemoLoginToken } from "./DemoLoginToken.js";

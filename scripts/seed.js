@@ -37,9 +37,24 @@ const manufacturers = [
 ];
 
 const suppliers = [
-  { name: "MedSupply Co.", contactInfo: "orders@medsupply.example", gstNumber: "27ABCDE1234F1Z5", paymentTerms: "Net 30" },
-  { name: "HealthDist Ltd.", contactInfo: "orders@healthdist.example", gstNumber: "29PQRST9876G2Z9", paymentTerms: "Net 15" },
-  { name: "CureWell Distributors", contactInfo: "orders@curewell.example", gstNumber: "24GHIJK5678H3X4", paymentTerms: "Net 30" },
+  {
+    name: "MedSupply Co.",
+    contactInfo: "orders@medsupply.example",
+    gstNumber: "27ABCDE1234F1Z5",
+    paymentTerms: "Net 30",
+  },
+  {
+    name: "HealthDist Ltd.",
+    contactInfo: "orders@healthdist.example",
+    gstNumber: "29PQRST9876G2Z9",
+    paymentTerms: "Net 15",
+  },
+  {
+    name: "CureWell Distributors",
+    contactInfo: "orders@curewell.example",
+    gstNumber: "24GHIJK5678H3X4",
+    paymentTerms: "Net 30",
+  },
 ];
 
 const seedMedicines = [
@@ -235,8 +250,22 @@ async function run() {
     medDocs.push(med);
   }
 
-  const locationPool = ["Front Shelf", "Front Shelf", "Backroom", "Cold Storage", "Front Shelf", "Backroom"];
-  const rackPool = ["Aisle A, Shelf 1", "Aisle A, Shelf 2", "Backroom Rack 1", "Cold Room 1", "Aisle B, Shelf 1", "Backroom Rack 2"];
+  const locationPool = [
+    "Front Shelf",
+    "Front Shelf",
+    "Backroom",
+    "Cold Storage",
+    "Front Shelf",
+    "Backroom",
+  ];
+  const rackPool = [
+    "Aisle A, Shelf 1",
+    "Aisle A, Shelf 2",
+    "Backroom Rack 1",
+    "Cold Room 1",
+    "Aisle B, Shelf 1",
+    "Backroom Rack 2",
+  ];
 
   let batchCount = 0;
   for (let i = 0; i < medDocs.length; i += 1) {
@@ -283,9 +312,24 @@ async function run() {
 
   const users = [
     { name: "Store Owner", email: "owner@pharmahub.demo", role: "Owner", orgName: "PharmaHub" },
-    { name: "Demo Pharmacist", email: "pharmacist@pharmahub.demo", role: "Pharmacist", orgName: "PharmaHub" },
-    { name: "Demo Cashier", email: "cashier@pharmahub.demo", role: "Cashier", orgName: "PharmaHub" },
-    { name: "Inventory Manager", email: "inventory@pharmahub.demo", role: "Inventory Manager", orgName: "PharmaHub" },
+    {
+      name: "Demo Pharmacist",
+      email: "pharmacist@pharmahub.demo",
+      role: "Pharmacist",
+      orgName: "PharmaHub",
+    },
+    {
+      name: "Demo Cashier",
+      email: "cashier@pharmahub.demo",
+      role: "Cashier",
+      orgName: "PharmaHub",
+    },
+    {
+      name: "Inventory Manager",
+      email: "inventory@pharmahub.demo",
+      role: "Inventory Manager",
+      orgName: "PharmaHub",
+    },
   ];
   let userCount = 0;
   for (const u of users) {

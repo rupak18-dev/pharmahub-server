@@ -46,7 +46,14 @@ export const createBatch = asyncHandler(async (req, res) => {
   const batch = new Batch(req.body);
   await refreshBatchStatus(batch);
   await batch.save();
-  recordAudit({ userId: req.user?._id, userName: req.user?.name, action: "Batch created", entityType: "batch", entityId: batch._id, ip: req.ip });
+  recordAudit({
+    userId: req.user?._id,
+    userName: req.user?.name,
+    action: "Batch created",
+    entityType: "batch",
+    entityId: batch._id,
+    ip: req.ip,
+  });
   return created(res, batch, "Batch created");
 });
 
@@ -56,7 +63,14 @@ export const updateBatch = asyncHandler(async (req, res) => {
   Object.assign(batch, req.body);
   await refreshBatchStatus(batch);
   await batch.save();
-  recordAudit({ userId: req.user?._id, userName: req.user?.name, action: "Batch updated", entityType: "batch", entityId: batch._id, ip: req.ip });
+  recordAudit({
+    userId: req.user?._id,
+    userName: req.user?.name,
+    action: "Batch updated",
+    entityType: "batch",
+    entityId: batch._id,
+    ip: req.ip,
+  });
   return ok(res, batch, "Batch updated");
 });
 

@@ -1,65 +1,30 @@
-import { Integration } from "../models/Integration.js";
+import { asyncHandler } from "../core/asyncHandler.js";
+import { ok } from "../core/responses.js";
+import * as integrationService from "../services/integration.service.js";
 
-export async function listIntegrations(req, res, next) {
-  try {
-    const list = await Integration.find({ userId: req.user._id });
-    const formatted = {};
-    for (const item of list) {
-      formatted[item.key] = {
-        key: item.key,
-        name: item.name,
-        connected: item.connected,
-        configured: item.configured,
-        config: item.config,
-        connectedAt: item.connectedAt,
-        lastSync: item.lastSync,
-      };
-    }
-    return res.json({ data: formatted });
-  } catch (err) {
-    return next(err);
-  }
-}
+export const listIntegrations = asyncHandler(async (req, res) => {
+  const data = await integrationService.listIntegrations(req.user);
+  return ok(res, data, "Integrations");
+});
 
-export async function connectIntegration(req, res, next) {
-  try {
-    const { key } = req.params;
-    const { name, config } = req.body;
-    let integration = await Integration.findOne({ key, userId: req.user._id });
-    if (!integration) {
-      integration = new Integration({
-        key,
-        name: name || key,
-        userId: req.user._id,
-      });
-    }
-    integration.connected = true;
-    integration.configured = true;
-    if (config) {
-      integration.config = { ...(integration.config || {}), ...config };
-    }
-    integration.connectedAt = new Date();
-    integration.lastSync = new Date();
-    await integration.save();
-    return res.json({ success: true, data: integration });
-  } catch (err) {
-    return next(err);
-  }
-}
+export const getIntegration = asyncHandler(async (req, res) => {
+  const data = await integrationService.getIntegration(req.user, req.params.id);
+  return ok(res, data, "Integration");
+});
 
-export async function disconnectIntegration(req, res, next) {
-  try {
-    const { key } = req.params;
-    const integration = await Integration.findOne({ key, userId: req.user._id });
-    if (integration) {
-      integration.connected = false;
-      integration.configured = false;
-      integration.config = {};
-      integration.connectedAt = null;
-      await integration.save();
-    }
-    return res.json({ success: true, message: "Integration disconnected" });
-  } catch (err) {
-    return next(err);
-  }
-}
+export const connectIntegration = asyncHandler(async (req, res) => {
+  const data = await integrationService.connectIntegration(req.user, req.params.id, req.body);
+  const message =
+    data.status === "connected" ? "Integration connected" : "Integration configuration saved";
+  return ok(res, data, message);
+});
+
+export const configureIntegration = asyncHandler(async (req, res) => {
+  const data = await integrationService.configureIntegration(req.user, req.params.id, req.body);
+  return ok(res, data, "Integration configuration saved");
+});
+
+export const disconnectIntegration = asyncHandler(async (req, res) => {
+  const data = await integrationService.disconnectIntegration(req.user, req.params.id);
+  return ok(res, data, "Integration disconnected");
+});

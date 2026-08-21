@@ -12,7 +12,16 @@ export async function ensureInventoryRecord({ batchId, locationType, rackCode })
   return InventoryItem.create({ batchId, locationType, rackCode, quantityOnHand: 0 });
 }
 
-export async function addStock({ batchId, locationType, rackCode, quantity, referenceDocId, userId, userName, note }) {
+export async function addStock({
+  batchId,
+  locationType,
+  rackCode,
+  quantity,
+  referenceDocId,
+  userId,
+  userName,
+  note,
+}) {
   if (quantity <= 0) throw ApiError.badRequest("Quantity must be positive");
   const session = await mongoose.startSession();
   try {
@@ -32,11 +41,32 @@ export async function addStock({ batchId, locationType, rackCode, quantity, refe
       await batch.save({ session });
 
       await InventoryLedger.create(
-        [{ batchId, movementType: "Purchase Inward", quantityChange: quantity, userId, userName, referenceDocId, note }],
+        [
+          {
+            batchId,
+            movementType: "Purchase Inward",
+            quantityChange: quantity,
+            userId,
+            userName,
+            referenceDocId,
+            note,
+          },
+        ],
         { session },
       );
       await StockMovement.create(
-        [{ medicineId: batch.medicineId, batchId, movementType: "in", quantity, reason: note ?? "Stock added", referenceDocId, createdBy: userId, createdByName: userName }],
+        [
+          {
+            medicineId: batch.medicineId,
+            batchId,
+            movementType: "in",
+            quantity,
+            reason: note ?? "Stock added",
+            referenceDocId,
+            createdBy: userId,
+            createdByName: userName,
+          },
+        ],
         { session },
       );
     });
@@ -46,7 +76,17 @@ export async function addStock({ batchId, locationType, rackCode, quantity, refe
   }
 }
 
-export async function removeStock({ batchId, locationType, rackCode, quantity, movementType, referenceDocId, userId, userName, note }) {
+export async function removeStock({
+  batchId,
+  locationType,
+  rackCode,
+  quantity,
+  movementType,
+  referenceDocId,
+  userId,
+  userName,
+  note,
+}) {
   if (quantity <= 0) throw ApiError.badRequest("Quantity must be positive");
   const session = await mongoose.startSession();
   try {
@@ -65,11 +105,32 @@ export async function removeStock({ batchId, locationType, rackCode, quantity, m
 
       await Batch.findByIdAndUpdate(batchId, { $inc: { currentStock: -quantity } }, { session });
       await InventoryLedger.create(
-        [{ batchId, movementType, quantityChange: -quantity, userId, userName, referenceDocId, note }],
+        [
+          {
+            batchId,
+            movementType,
+            quantityChange: -quantity,
+            userId,
+            userName,
+            referenceDocId,
+            note,
+          },
+        ],
         { session },
       );
       await StockMovement.create(
-        [{ medicineId: (await Batch.findById(batchId).session(session))?.medicineId, batchId, movementType: "out", quantity, reason: note ?? movementType, referenceDocId, createdBy: userId, createdByName: userName }],
+        [
+          {
+            medicineId: (await Batch.findById(batchId).session(session))?.medicineId,
+            batchId,
+            movementType: "out",
+            quantity,
+            reason: note ?? movementType,
+            referenceDocId,
+            createdBy: userId,
+            createdByName: userName,
+          },
+        ],
         { session },
       );
     });
@@ -91,18 +152,41 @@ export async function adjustStock({ batchId, newQuantity, reason, userId, userNa
 
       const oldQuantity = record.quantityOnHand;
       const delta = newQuantity - oldQuantity;
-      item = await InventoryItem.findByIdAndUpdate(record._id, { quantityOnHand: newQuantity }, { new: true, session });
+      item = await InventoryItem.findByIdAndUpdate(
+        record._id,
+        { quantityOnHand: newQuantity },
+        { new: true, session },
+      );
 
       batch.currentStock = Math.max(0, batch.currentStock + delta);
       await batch.save({ session });
 
       await InventoryLedger.create(
-        [{ batchId, movementType: "Stock Adjustment", quantityChange: delta, userId, userName, note: reason }],
+        [
+          {
+            batchId,
+            movementType: "Stock Adjustment",
+            quantityChange: delta,
+            userId,
+            userName,
+            note: reason,
+          },
+        ],
         { session },
       );
       if (delta !== 0) {
         await StockMovement.create(
-          [{ medicineId: batch.medicineId, batchId, movementType: "adjustment", quantity: Math.abs(delta), reason: reason ?? "Stock adjustment", createdBy: userId, createdByName: userName }],
+          [
+            {
+              medicineId: batch.medicineId,
+              batchId,
+              movementType: "adjustment",
+              quantity: Math.abs(delta),
+              reason: reason ?? "Stock adjustment",
+              createdBy: userId,
+              createdByName: userName,
+            },
+          ],
           { session },
         );
       }

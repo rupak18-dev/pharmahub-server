@@ -12,8 +12,18 @@ router.use(auth);
 
 router.get("/", authorize("medicines", "view"), categoryController.listCategories);
 router.get("/:id", authorize("medicines", "view"), categoryController.getCategory);
-router.post("/", authorize("medicines", "create"), validate(categorySchemas.create), categoryController.createCategory);
-router.patch("/:id", authorize("medicines", "update"), validate(categorySchemas.update), categoryController.updateCategory);
+router.post(
+  "/",
+  authorize("medicines", "create"),
+  validate(categorySchemas.create),
+  categoryController.createCategory,
+);
+router.patch(
+  "/:id",
+  authorize("medicines", "update"),
+  validate(categorySchemas.update),
+  categoryController.updateCategory,
+);
 router.delete("/:id", authorize("medicines", "delete"), categoryController.deleteCategory);
 
 export default router;
