@@ -26,10 +26,11 @@ function generateCode() {
 
 /**
  * Generates a 6-digit code for `email`/`purpose`, stores a hash, and emails it.
- * Returns `devCode` in non-production so the flow can be tested without an
- * email provider.
+ * `subject`/`html` override the default email copy; `{{code}}` inside them is
+ * replaced with the generated code. Returns `devCode` in non-production so the
+ * flow can be tested without an email provider.
  */
-export async function createAndSendOtp({ email, purpose }) {
+export async function createAndSendOtp({ email, purpose, subject, html }) {
   const normalizedEmail = email.toLowerCase();
   const existing = await Otp.findOne({ email: normalizedEmail, purpose });
   if (existing && Date.now() - existing.updatedAt.getTime() < RESEND_COOLDOWN_MS) {
@@ -51,8 +52,10 @@ export async function createAndSendOtp({ email, purpose }) {
 
   const transport = await sendEmail({
     to: normalizedEmail,
-    subject: "Your PharmaHub verification code",
-    html: `<p>Your PharmaHub verification code is:</p>
+    subject: subject ?? "Your PharmaHub verification code",
+    html:
+      html?.replace(/\{\{code\}\}/g, code) ??
+      `<p>Your PharmaHub verification code is:</p>
 <p style="font-size:24px;font-weight:bold;letter-spacing:4px">${code}</p>
 <p>It expires in 10 minutes. If you didn't request this code, you can ignore this email.</p>`,
   });

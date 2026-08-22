@@ -287,17 +287,46 @@ async function run() {
     });
     batchCount += 1;
 
-    await Batch.create({
+    const secondQty = Math.max(0, Math.round(stockQty / 3));
+    const secondBatch = await Batch.create({
       medicineId: med._id,
       batchNumber: `${med.prefix}-${String(new Date().getFullYear()).slice(-2)}02-${String(i + 1).padStart(2, "0")}`,
-      mfgDate: daysFromNow(-300),
-      expiryDate: daysFromNow(90),
-      mrp: 40 + i * 15,
-      purchasePrice: 25 + i * 10,
-      sellingPrice: 38 + i * 14,
+      batchType: "C",
+      dates: {
+        manufacturingDate: daysFromNow(-300),
+        expiryDate: daysFromNow(90),
+        quarantineUntil: null,
+      },
+      pricing: {
+        purchasePrice: 25 + i * 10,
+        mrp: 40 + i * 15,
+        sellingPrice: 38 + i * 14,
+        gstRate: med.gstRate ?? 12,
+      },
+      status: { isRecalled: false, state: "ACTIVE", quarantineReason: null },
+      stock: {
+        uom: "Units",
+        quantityOnHand: secondQty,
+        reservedQuantity: 0,
+        quarantined: 0,
+      },
+      warehouse: {
+        locationType: locationPool[(i + 1) % locationPool.length],
+        rackCode: rackPool[(i + 1) % rackPool.length],
+      },
       supplierId: supDocs[(i + 1) % 2]._id,
-      currentStock: Math.max(0, Math.round(stockQty / 3)),
-      status: "near_expiry",
+      audit: { createdAt: new Date(), updatedAt: new Date(), updatedBy: "seed" },
+      version: 1,
+      movements: [
+        {
+          id: randomUUID(),
+          type: "created",
+          note: "Batch seeded",
+          qty: secondQty,
+          timestamp: new Date(),
+          by: "seed",
+        },
+      ],
     });
     batchCount += 1;
 
@@ -308,39 +337,14 @@ async function run() {
       quantityOnHand: stockQty,
       reservedQuantity: 0,
     });
-  }
 
-  const users = [
-    { name: "Store Owner", email: "owner@pharmahub.demo", role: "Owner", orgName: "PharmaHub" },
-    {
-      name: "Demo Pharmacist",
-      email: "pharmacist@pharmahub.demo",
-      role: "Pharmacist",
-      orgName: "PharmaHub",
-    },
-    {
-      name: "Demo Cashier",
-      email: "cashier@pharmahub.demo",
-      role: "Cashier",
-      orgName: "PharmaHub",
-    },
-    {
-      name: "Inventory Manager",
-      email: "inventory@pharmahub.demo",
-      role: "Inventory Manager",
-      orgName: "PharmaHub",
-    },
-  ];
-  let userCount = 0;
-  for (const u of users) {
-    const exists = await User.findOne({ email: u.email });
-    if (!exists) {
-      await User.create({
-        ...u,
-        passwordHash: await bcrypt.hash("password123", 10),
-      });
-      userCount += 1;
-    }
+    await InventoryItem.create({
+      batchId: secondBatch._id,
+      locationType: locationPool[(i + 1) % locationPool.length],
+      rackCode: rackPool[(i + 1) % rackPool.length],
+      quantityOnHand: secondQty,
+      reservedQuantity: 0,
+    });
   }
 
   console.log("[seed] done");

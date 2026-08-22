@@ -118,12 +118,26 @@ export const authSchemas = {
     name: z.string().trim().min(1, "Name is required").max(120),
     email: emailSchema,
     password: passwordSchema,
-    role: z.string().trim().optional(),
     orgName: z.string().trim().optional(),
   }),
   login: z.object({
     email: emailSchema,
     password: z.string().min(1, "Password is required"),
+    remember: z.boolean().optional(),
+  }),
+  forgotPassword: z.object({
+    email: emailSchema,
+  }),
+  resetPassword: z.object({
+    email: emailSchema,
+    code: z.string().trim().regex(/^\d{6}$/, "Enter the 6-digit code from your email"),
+    newPassword: passwordSchema,
+  }),
+  profile: z.object({
+    name: z.string().trim().min(1, "Name is required").max(120).optional(),
+    role: z.enum(["Owner", "Admin", "Pharmacist", "Cashier", "Store Keeper", "Inventory Manager"]).optional(),
+    orgName: z.string().trim().max(120).optional(),
+    onboarded: z.boolean().optional(),
   }),
   changePassword: z.object({
     currentPassword: z.string().min(1),

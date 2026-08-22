@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 
 import { env } from "../config/env.js";
+import { constants } from "../config/constants.js";
 import { ApiError } from "../core/ApiError.js";
 import { User } from "../models/User.js";
 import { PasswordResetToken } from "../models/PasswordResetToken.js";
@@ -16,6 +17,7 @@ import { getEffectivePermissions, normalizePermissions } from "./permissions.ser
 function hashToken(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
+import { verifyOtp } from "./otp.service.js";
 
 export async function registerUser({ name, email, password, orgName }) {
   const normalizedEmail = email.toLowerCase();
@@ -34,7 +36,26 @@ export async function registerUser({ name, email, password, orgName }) {
     orgName,
   });
 
-  return { user: toPublicUser(user) };
+  const token = signToken(user._id);
+  return { token, user: toPublicUser(user) };
+}
+
+export async function updateProfile(userId, { name, role, orgName, onboarded }) {
+  const user = await User.findById(userId);
+  if (!user) throw ApiError.notFound("User not found");
+
+  if (name !== undefined) user.name = name.trim();
+  if (role !== undefined) {
+    if (!constants.roles.includes(role.trim())) {
+      throw ApiError.badRequest(`Invalid role. Must be one of: ${constants.roles.join(", ")}`);
+    }
+    user.role = role.trim();
+  }
+  if (orgName !== undefined) user.orgName = orgName?.trim() ?? null;
+  if (onboarded !== undefined) user.onboarded = onboarded;
+
+  await user.save();
+  return toPublicUser(user);
 }
 
 export async function loginUser({ email, password }) {
@@ -133,17 +154,18 @@ export async function verifyDemoLogin(token) {
   record.used = true;
   await record.save();
 
-  const user = await User.findOne({ email: record.email });
-  if (!user) {
-    throw ApiError.unauthorized("User account not found");
-  }
+  const user = await User.create({
+    name: name ?? email.split("@")[0],
+    email,
+    picture: picture ?? null,
+    googleId,
+    provider: "google",
+    role: "Pharmacist",
+    onboarded: false,
+  });
 
-  const jwtToken = signToken(user._id);
-  const publicUser = await toAuthUser(user.toObject());
-  return {
-    token: jwtToken,
-    user: publicUser,
-  };
+  const token = signToken(user._id);
+  return { token, user: toPublicUser(user) };
 }
 
 export async function changePassword(userId, { currentPassword, newPassword }) {
@@ -246,14 +268,54 @@ export async function resetPassword({ token, newPassword }, ip) {
   return { user: toPublicUser(user.toObject()) };
 }
 
+/**
+ * Completes a forgot-password flow: consumes the emailed OTP, then sets the
+ * new password. Google-created accounts may set their first password here.
+ * Returns the user id for audit logging.
+ */
+export async function resetPassword({ email, code, newPassword }) {
+  await verifyOtp({ email, purpose: "password_reset", code });
+  const user = await User.findOne({ email: email.toLowerCase() }).collation({
+    locale: "en",
+    strength: 2,
+  });
+  if (!user || !user.active) throw ApiError.badRequest("No account found for this email");
+
+  user.passwordHash = await bcrypt.hash(newPassword, 10);
+  user.provider = "email";
+  await user.save();
+  return String(user._id);
+}
+
 function signToken(userId) {
   return jwt.sign({ sub: String(userId) }, env.jwtSecret, {
+    algorithm: "HS256",
+    issuer: "pharmahub",
     expiresIn: env.jwtExpiresIn,
   });
 }
 
-export function issueToken(userId) {
-  return signToken(userId);
+const SESSION_COOKIE_OPTIONS = {
+  httpOnly: env.cookie.httpOnly,
+  secure: env.cookie.secure,
+  sameSite: env.cookie.sameSite,
+  path: "/",
+};
+
+export function setSessionCookie(res, token, { remember = true } = {}) {
+  const options = { ...SESSION_COOKIE_OPTIONS };
+  // remember=false → browser-session cookie (no Max-Age): signing in ends when
+  // the browser closes, matching the frontend's sessionStorage choice.
+  if (remember !== false) {
+    options.maxAge = env.cookie.maxAgeDays * 24 * 60 * 60 * 1000;
+  }
+  res.cookie(env.cookie.name, token, options);
+}
+
+export function clearSessionCookie(res) {
+  res.clearCookie(env.cookie.name, {
+    ...SESSION_COOKIE_OPTIONS,
+  });
 }
 
 export function toPublicUser(user) {

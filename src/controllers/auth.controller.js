@@ -7,14 +7,20 @@ import {
   loginUser,
   registerUser,
   changePassword,
-  toAuthUser,
-  issueToken,
+  updateProfile,
+  toPublicUser,
+  setSessionCookie,
+  clearSessionCookie,
+  signInWithGoogle,
+  signUpWithGoogle,
+  resetPassword as resetPasswordService,
 } from "../services/auth.service.js";
 import {
   googleAuthUrl,
   exchangeCodeForProfile,
 } from "../services/googleAuth.service.js";
 import { requestDemoLogin, verifyDemoLogin } from "../services/demo-login.service.js";
+import { createAndSendOtp } from "../services/otp.service.js";
 import { recordAudit } from "../services/audit.service.js";
 import { computeProfileCompletion } from "../services/profileCompletion.service.js";
 import { User } from "../models/User.js";
@@ -35,6 +41,7 @@ export const register = asyncHandler(async (req, res) => {
 
 export const login = asyncHandler(async (req, res) => {
   const result = await loginUser(req.body);
+  setSessionCookie(res, result.token, { remember: req.body.remember ?? true });
   recordAudit({
     userId: result.user.id,
     userName: result.user.name,
@@ -82,13 +89,40 @@ export const updatePassword = asyncHandler(async (req, res) => {
   return ok(res, null, "Password updated");
 });
 
-export const demoLogin = asyncHandler(async (req, res) => {
-  const result = await requestDemoLogin(req.body.email);
-  return ok(res, result, "Demo login link sent to your email");
+export const forgotPassword = asyncHandler(async (req, res) => {
+  const email = req.body.email.toLowerCase();
+  const user = await User.findOne({ email })
+    .collation({ locale: "en", strength: 2 })
+    .select("_id active")
+    .lean();
+  if (user?.active) {
+    await createAndSendOtp({
+      email,
+      purpose: "password_reset",
+      subject: "Reset your PharmaHub password",
+      html: `<p>We received a request to reset your PharmaHub password. Enter this code to continue:</p>
+<p style="font-size:24px;font-weight:bold;letter-spacing:4px">{{code}}</p>
+<p>The code expires in 10 minutes. If you didn't request a reset, you can ignore this email.</p>`,
+    });
+  }
+  // Same response whether or not the account exists — no account enumeration.
+  return ok(res, null, "If that email belongs to an account, a reset code is on its way.");
 });
 
-export const demoLoginVerify = asyncHandler(async (req, res) => {
-  const result = await verifyDemoLogin(req.body.token);
+export const resetPassword = asyncHandler(async (req, res) => {
+  const userId = await resetPasswordService(req.body);
+  recordAudit({
+    userId,
+    action: "Password reset via email code",
+    entityType: "user",
+    entityId: userId,
+    ip: req.ip,
+  });
+  return ok(res, null, "Password updated. You can sign in with your new password.");
+});
+
+export const updateMyProfile = asyncHandler(async (req, res) => {
+  const user = await updateProfile(req.user._id, req.body);
   recordAudit({
     userId: result.user.id,
     userName: result.user.name,

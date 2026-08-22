@@ -32,14 +32,17 @@ router.post(
 );
 
 router.get("/me", auth, authController.me);
-
-router.post("/logout", auth, authController.logout);
-
+router.put("/profile", auth, validate(authSchemas.profile), authController.updateMyProfile);
+router.post("/change-password", auth, validate(authSchemas.changePassword), authController.updatePassword);
 router.post(
-  "/change-password",
-  auth,
-  validate(authSchemas.changePassword),
-  authController.updatePassword,
+  "/forgot-password",
+  validate(authSchemas.forgotPassword),
+  authController.forgotPassword,
+);
+router.post(
+  "/reset-password",
+  validate(authSchemas.resetPassword),
+  authController.resetPassword,
 );
 
 // PUT /auth/profile — convenience alias used by the frontend auth service.
