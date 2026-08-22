@@ -149,6 +149,17 @@ export const env = {
     envVar("CORS_ORIGIN", "cors_origin") ??
     "*",
 
+  // Demo account passwords (development/demo flows). Defaults preserve the
+  // previous hardcoded values; set these in any shared or production
+  // environment so demo credentials are never taken from source control.
+  demoAccountPassword:
+    process.env.DEMO_ACCOUNT_PASSWORD ??
+    "password123",
+
+  devDemoPassword:
+    process.env.DEV_DEMO_PASSWORD ??
+    "PharmaHub@123",
+
   cookie: {
     name: "pharmahub_session",
 

@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 
 import { connectDB, disconnectDB } from "../src/config/db.js";
+import { env } from "../src/config/env.js";
 import { Category } from "../src/models/Category.js";
 import { Manufacturer } from "../src/models/Manufacturer.js";
 import { Supplier } from "../src/models/Supplier.js";
@@ -337,7 +338,7 @@ async function run() {
     if (!exists) {
       await User.create({
         ...u,
-        passwordHash: await bcrypt.hash("password123", 10),
+        passwordHash: await bcrypt.hash(env.demoAccountPassword, 10),
       });
       userCount += 1;
     }
@@ -351,7 +352,7 @@ async function run() {
   console.log(`  batches      : ${batchCount}`);
   console.log(`  users        : ${userCount} created`);
   console.log("");
-  console.log("  Sign-in accounts (password: password123)");
+  console.log("  Sign-in accounts (password: DEMO_ACCOUNT_PASSWORD)");
   console.log("  owner@pharmahub.demo   | pharmacist@pharmahub.demo");
   console.log("  cashier@pharmahub.demo | inventory@pharmahub.demo");
 

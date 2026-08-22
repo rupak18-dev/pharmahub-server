@@ -1,3 +1,5 @@
+import { env } from "./env.js";
+
 export const constants = {
   app: {
     name: "PharmaHub",
@@ -9,7 +11,7 @@ export const constants = {
     demoOwner: {
       name: "PharmaHub Demo Owner",
       email: "demo@pharmahub.local",
-      password: "PharmaHub@123",
+      password: env.devDemoPassword,
       role: "Owner",
       orgName: "PharmaHub",
     },

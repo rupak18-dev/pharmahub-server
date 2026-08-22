@@ -47,7 +47,7 @@ export async function loginUser({ email, password }) {
     !user &&
     (normalizedEmail.endsWith("@pharmahub.demo") || normalizedEmail === "demo@pharmahub.com")
   ) {
-    const passwordHash = await bcrypt.hash("password123", 10);
+    const passwordHash = await bcrypt.hash(env.demoAccountPassword, 10);
     const role = normalizedEmail.includes("owner")
       ? "Owner"
       : normalizedEmail.includes("admin")
@@ -83,7 +83,7 @@ export async function requestDemoLogin(email) {
 
   let user = await User.findOne({ email: normalizedEmail });
   if (!user) {
-    const passwordHash = await bcrypt.hash("password123", 10);
+    const passwordHash = await bcrypt.hash(env.demoAccountPassword, 10);
     const role = normalizedEmail.includes("owner")
       ? "Owner"
       : normalizedEmail.includes("admin")
