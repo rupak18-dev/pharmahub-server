@@ -19,8 +19,8 @@ export const auth = asyncHandler(async (req, _res, next) => {
   }
 
   const user = await User.findById(payload.sub).lean();
-  if (!user || !user.active) {
-    throw ApiError.unauthorized("User not found or deactivated");
+  if (!user || !user.active || user.status === "removed") {
+    throw ApiError.unauthorized("User account is inactive or removed");
   }
 
   req.user = user;

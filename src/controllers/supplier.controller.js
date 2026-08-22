@@ -28,12 +28,22 @@ export const getSupplier = asyncHandler(async (req, res) => {
 
 export const createSupplier = asyncHandler(async (req, res) => {
   const item = await Supplier.create(req.body);
-  recordAudit({ userId: req.user?._id, userName: req.user?.name, action: "Supplier created", entityType: "supplier", entityId: item._id, ip: req.ip });
+  recordAudit({
+    userId: req.user?._id,
+    userName: req.user?.name,
+    action: "Supplier created",
+    entityType: "supplier",
+    entityId: item._id,
+    ip: req.ip,
+  });
   return created(res, item, "Supplier created");
 });
 
 export const updateSupplier = asyncHandler(async (req, res) => {
-  const item = await Supplier.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+  const item = await Supplier.findByIdAndUpdate(req.params.id, req.body, {
+    new: true,
+    runValidators: true,
+  });
   if (!item) throw ApiError.notFound("Supplier not found");
   return ok(res, item, "Supplier updated");
 });

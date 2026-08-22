@@ -12,6 +12,22 @@ jobs:
   ci:
     runs-on: ubuntu-latest
 
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      MONGO_URI: mongodb://127.0.0.1:27017/pharmahub_test
+      MONGO_URI_TEST: mongodb://127.0.0.1:27017/pharmahub_test
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -24,6 +40,41 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Wait for MongoDB
+        run: |
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/27017) >/dev/null 2>&1; then
+              echo "MongoDB is accepting connections"
+              exit 0
+            fi
+            echo "Waiting for MongoDB ($i/30)..."
+            sleep 2
+          done
+          echo "MongoDB did not become ready in time"
+          exit 1
+
+      # The invitation E2E test expects an Owner to exist. Fresh CI databases
+      # are empty (the dev user is only seeded by src/server.js), so create one
+      # with the app's own models before running the suite.
+      - name: Seed CI database
+        run: |
+          node --input-type=module -e "
+            import mongoose from 'mongoose';
+            await mongoose.connect(process.env.MONGO_URI);
+            const { Role } = await import('./src/models/Role.js');
+            const { User } = await import('./src/models/User.js');
+            await Role.ensureSystemRoles();
+            await User.create({
+              name: 'CI Owner',
+              email: 'ci-owner@pharmahub.test',
+              role: 'Owner',
+              orgName: 'PharmaHub CI',
+              active: true,
+              status: 'active',
+            });
+            await mongoose.disconnect();
+          "
 
       - name: Lint
         run: npm run lint

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { constants } from "../config/constants.js";
+import { normalizeIndianPhone } from "../utils/phone.js";
 
 /**
  * @typedef {import("mongoose").Document} MongooseDocument
@@ -27,30 +27,15 @@ import { constants } from "../config/constants.js";
  *
  * @typedef {object} IBatch
  * @property {import("mongoose").Types.ObjectId} medicineId
- * @property {import("mongoose").Types.ObjectId} [supplierId]
  * @property {string} batchNumber
- * @property {"C"|"L"|"V"} [batchType]
- * @property {object} dates
- * @property {Date} dates.manufacturingDate
- * @property {Date} dates.expiryDate
- * @property {Date|null} [dates.quarantineUntil]
- * @property {object} pricing
- * @property {number} pricing.purchasePrice
- * @property {number} pricing.mrp
- * @property {number} pricing.sellingPrice
- * @property {number} pricing.gstRate
- * @property {object} status
- * @property {boolean} status.isRecalled
- * @property {"ACTIVE"|"QUARANTINED"|"RECALLED"|"BLOCKED"|"RETIRED"} status.state
- * @property {string|null} [status.quarantineReason]
- * @property {object} stock
- * @property {string} stock.uom
- * @property {number} stock.quantityOnHand
- * @property {number} stock.reservedQuantity
- * @property {number} stock.quarantined
- * @property {object} warehouse
- * @property {string} warehouse.locationType
- * @property {string} warehouse.rackCode
+ * @property {Date} mfgDate
+ * @property {Date} expiryDate
+ * @property {number} mrp
+ * @property {number} purchasePrice
+ * @property {number} sellingPrice
+ * @property {import("mongoose").Types.ObjectId} [supplierId]
+ * @property {number} currentStock
+ * @property {string} status
  *
  * @typedef {object} ISaleItem
  * @property {import("mongoose").Types.ObjectId} medicineId
@@ -108,18 +93,29 @@ const idsSchema = () =>
     .refine((v) => !v || /^[0-9a-fA-F]{24}$/.test(v), "Invalid ObjectId");
 
 const emailSchema = z.string().trim().email("Invalid email").max(160);
-const passwordSchema = z
+const passwordSchema = z.string().min(6, "Password must be at least 6 characters").max(128);
+
+// Optional Indian mobile number: accepts "+91 98765 43210", "98765 43210" or
+// "+919876543210" and normalizes to "+919876543210". Empty/absent is allowed.
+const phoneSchema = z
   .string()
-  .min(8, "Password must be at least 8 characters")
-  .max(128)
-  .regex(/[A-Z]/, "Password must include an uppercase letter")
-  .regex(/[a-z]/, "Password must include a lowercase letter")
-  .regex(/[0-9]/, "Password must include a number")
-  .regex(/[^A-Za-z0-9]/, "Password must include a special character");
+  .trim()
+  .max(20, "Phone number is too long")
+  .optional()
+  .refine(
+    (v) => !v || /^(?:\+91)?[6-9]\d{9}$/.test(v.replace(/[\s\-().]/g, "")),
+    "Enter a valid Indian mobile number (10 digits starting with 6–9, e.g. +91 98765 43210)",
+  )
+  .transform((v) => (v ? normalizeIndianPhone(v) : v));
+
+// Lenient phone schema for PATCH updates: accepts any non-empty string up to
+// 20 chars without enforcing Indian format. This prevents stored phones in
+// non-Indian formats from blocking unrelated field updates.
+const updatePhoneSchema = z.string().trim().max(20, "Phone number is too long").optional();
 
 export const authSchemas = {
   register: z.object({
-    name: z.string().trim().max(120).optional(),
+    name: z.string().trim().min(1, "Name is required").max(120),
     email: emailSchema,
     password: passwordSchema,
     role: z.string().trim().optional(),
@@ -129,40 +125,19 @@ export const authSchemas = {
     email: emailSchema,
     password: z.string().min(1, "Password is required"),
   }),
-  profile: z.object({
-    name: z.string().trim().min(1, "Name is required").max(120).optional(),
-    role: z.string().trim().min(1, "Role is required").optional(),
-    orgName: z.string().trim().max(120).optional(),
-    onboarded: z.boolean().optional(),
-  }),
   changePassword: z.object({
     currentPassword: z.string().min(1),
     newPassword: passwordSchema,
   }),
-};
-
-export const onboardingSchemas = {
-  upsert: z.object({
-    businessType: z.enum(["retail", "dealer", "enterprise", "hospital", "other"]).optional(),
-    personal: z
-      .object({
-        firstName: z.string().trim().max(80).optional(),
-        lastName: z.string().trim().max(80).optional(),
-        phone: z.string().trim().max(20).optional(),
-        jobTitle: z.string().trim().max(120).optional(),
-      })
-      .optional(),
-    workspace: z
-      .object({
-        organizationName: z.string().trim().max(120).optional(),
-        branchName: z.string().trim().max(120).optional(),
-        drugLicenseNumber: z.string().trim().max(80).optional(),
-        gstNumber: z.string().trim().max(80).optional(),
-      })
-      .optional(),
-    quickStart: z.array(z.string()).optional(),
-    currentStep: z.number().int().min(0).optional(),
-    completedAt: z.string().datetime().nullable().optional(),
+  forgotPassword: z.object({
+    email: emailSchema,
+  }),
+  resetPassword: z.object({
+    token: z.string().trim().min(1),
+    newPassword: passwordSchema,
+  }),
+  demoLogin: z.object({
+    email: emailSchema,
   }),
 };
 
@@ -173,12 +148,64 @@ export const userSchemas = {
     password: passwordSchema,
     role: z.string().trim().min(1),
     orgName: z.string().trim().optional(),
+    phone: phoneSchema,
   }),
   update: z
     .object({
       name: z.string().trim().min(1).max(120).optional(),
       role: z.string().trim().min(1).optional(),
       active: z.boolean().optional(),
+      status: z.enum(["active", "suspended", "inactive"]).optional(),
+      phone: updatePhoneSchema,
+      email: emailSchema.optional(),
+      permissions: z.record(z.string(), z.record(z.string(), z.boolean())).optional(),
+      featureAccess: z.record(z.string(), z.boolean()).optional(),
+      accessIds: z.array(z.string().trim().min(1).max(80)).optional(),
+      department: z.string().trim().max(120).optional(),
+      designation: z.string().trim().max(120).optional(),
+    })
+    .refine((v) => Object.keys(v).length > 0, "At least one field is required"),
+  invite: z.object({
+    name: z.string().trim().max(120).optional(),
+    email: emailSchema,
+    role: z.string().trim().min(1),
+    phone: phoneSchema,
+    department: z.string().trim().max(120).optional(),
+    message: z.string().trim().max(500).optional(),
+    // Per-user permission overrides (module -> action flags). Any shape that
+    // passes through is re-sanitized server-side against the canonical module
+    // and action lists, so a loose schema here is acceptable.
+    permissions: z.record(z.string(), z.record(z.string(), z.boolean())).optional(),
+    featureAccess: z.record(z.string(), z.boolean()).optional(),
+    accessIds: z.array(z.string().trim().min(1).max(80)).optional(),
+  }),
+  acceptInvitation: z.object({
+    token: z.string().trim().min(1),
+    name: z.string().trim().max(120).optional(),
+    password: passwordSchema,
+    phone: phoneSchema,
+  }),
+  updateProfile: z
+    .object({
+      name: z.string().trim().min(1).max(120).optional(),
+      email: emailSchema.optional(),
+      phone: phoneSchema,
+      orgName: z.string().trim().max(120).optional(),
+      tagline: z.string().trim().max(200).optional(),
+      description: z.string().trim().max(2000).optional(),
+      businessEmail: emailSchema.optional(),
+      website: z.string().trim().max(200).optional(),
+      address: z.string().trim().max(500).optional(),
+      city: z.string().trim().max(100).optional(),
+      state: z.string().trim().max(100).optional(),
+      pincode: z.string().trim().max(20).optional(),
+      gstin: z.string().trim().max(30).optional(),
+      licenseNo: z.string().trim().max(50).optional(),
+      businessType: z.string().trim().max(100).optional(),
+      services: z.string().trim().max(1000).optional(),
+      businessHours: z.string().trim().max(500).optional(),
+      metaPixelId: z.string().trim().max(200).optional(),
+      branches: z.array(z.string().trim().max(200)).max(20).optional(),
     })
     .refine((v) => Object.keys(v).length > 0, "At least one field is required"),
 };
@@ -215,104 +242,34 @@ export const medicineSchemas = {
   update: medicineCreateSchema.partial(),
 };
 
-const BATCH_STATES = ["ACTIVE", "QUARANTINED", "RECALLED", "BLOCKED", "RETIRED"];
-const BATCH_LOCATIONS = constants.locationTypes;
-
-const batchUpdateFields = {
-  medicineId: idsSchema(),
-  supplierId: z.string().nullable().optional(),
-  batchNumber: z.string().trim().min(1).max(40).optional(),
-  batchType: z.enum(["C", "L", "V"]).optional(),
-  dates: z
-    .object({
-      manufacturingDate: z.coerce.date().optional(),
-      expiryDate: z.coerce.date().optional(),
-      quarantineUntil: z.coerce.date().nullable().optional(),
-    })
-    .optional(),
-  pricing: z
-    .object({
-      purchasePrice: z.coerce.number().min(0).optional(),
-      mrp: z.coerce.number().min(0).optional(),
-      sellingPrice: z.coerce.number().min(0).optional(),
-      gstRate: z.coerce.number().min(0).optional(),
-    })
-    .optional(),
-  status: z
-    .object({
-      isRecalled: z.boolean().optional(),
-      state: z.enum(BATCH_STATES).optional(),
-      quarantineReason: z.string().nullable().optional(),
-    })
-    .optional(),
-  stock: z
-    .object({
-      uom: z.string().optional(),
-      quantityOnHand: z.coerce.number().int().min(0).optional(),
-      reservedQuantity: z.coerce.number().int().min(0).optional(),
-      quarantined: z.coerce.number().int().min(0).optional(),
-    })
-    .optional(),
-  warehouse: z
-    .object({
-      locationType: z.enum(BATCH_LOCATIONS).optional(),
-      rackCode: z.string().trim().max(40).optional(),
-    })
-    .optional(),
-};
-
-export const batchActions = ["quarantine", "activate", "recall", "block", "retire"];
-
-const batchActionSchema = z.object({
-  action: z.enum(batchActions),
-  reason: z.string().trim().max(300).optional(),
-});
-
 export const batchSchemas = {
   create: z.object({
     medicineId: objectId(),
-    supplierId: z.string().nullable().optional(),
     batchNumber: z.string().trim().min(1).max(40),
-    batchType: z.enum(["C", "L", "V"]).default("C"),
-    dates: z.object({
-      manufacturingDate: z.coerce.date(),
-      expiryDate: z.coerce.date(),
-      quarantineUntil: z.coerce.date().nullable().optional(),
-    }),
-    pricing: z
-      .object({
-        purchasePrice: z.coerce.number().min(0).default(0),
-        mrp: z.coerce.number().min(0).default(0),
-        sellingPrice: z.coerce.number().min(0).default(0),
-        gstRate: z.coerce.number().min(0).default(0),
-      })
-      .optional(),
-    status: z
-      .object({
-        isRecalled: z.boolean().optional().default(false),
-        state: z.enum(BATCH_STATES).optional().default("ACTIVE"),
-        quarantineReason: z.string().nullable().optional().default(null),
-      })
-      .optional(),
-    stock: z
-      .object({
-        uom: z.string().optional().default("Units"),
-        quantityOnHand: z.coerce.number().int().min(0).default(0),
-        reservedQuantity: z.coerce.number().int().min(0).default(0),
-        quarantined: z.coerce.number().int().min(0).default(0),
-      })
-      .optional(),
-    warehouse: z.object({
-      locationType: z.enum(BATCH_LOCATIONS),
-      rackCode: z.string().trim().max(40).default(""),
-    }),
+    mfgDate: z.coerce.date(),
+    expiryDate: z.coerce.date(),
+    mrp: z.coerce.number().min(0).optional(),
+    purchasePrice: z.coerce.number().min(0).optional(),
+    sellingPrice: z.coerce.number().min(0).optional(),
+    supplierId: idsSchema(),
+    currentStock: z.coerce.number().int().min(0).default(0),
+    status: z.string().trim().optional(),
+    locationType: z.string().trim().optional(),
+    rackCode: z.string().trim().max(40).optional(),
+    quantityReceived: z.coerce.number().int().min(0).optional(),
   }),
-  update: z.object(batchUpdateFields),
-  action: batchActionSchema,
-  patch: z.union([
-    batchActionSchema,
-    z.object(batchUpdateFields).refine((v) => Object.keys(v).length > 0, "At least one field is required"),
-  ]),
+  update: z.object({
+    batchNumber: z.string().trim().min(1).max(40).optional(),
+    mfgDate: z.coerce.date().optional(),
+    expiryDate: z.coerce.date().optional(),
+    mrp: z.coerce.number().min(0).optional(),
+    purchasePrice: z.coerce.number().min(0).optional(),
+    sellingPrice: z.coerce.number().min(0).optional(),
+    supplierId: idsSchema(),
+    status: z.string().trim().optional(),
+    locationType: z.string().trim().optional(),
+    rackCode: z.string().trim().max(40).optional(),
+  }),
 };
 
 const categoryCreateSchema = z.object({
@@ -365,7 +322,10 @@ export const inventorySchemas = {
   }),
   movement: z.object({
     movementType: z.string().trim().min(1),
-    quantityChange: z.coerce.number().int().refine((v) => v !== 0, "Cannot be zero"),
+    quantityChange: z.coerce
+      .number()
+      .int()
+      .refine((v) => v !== 0, "Cannot be zero"),
     batchId: objectId(),
     locationType: z.string().trim().optional(),
     rackCode: z.string().trim().optional(),
@@ -446,5 +406,23 @@ export const auditSchemas = {
     entityType: z.string().trim().optional(),
     entityId: z.string().trim().optional(),
     details: z.record(z.any()).optional(),
+  }),
+};
+
+// Integration config values are plain, non-secret strings (phone numbers,
+// org ids, etc.). Secret/credential fields are rejected at write time by the
+// integration service, never persisted.
+const integrationConfigSchema = z.record(
+  z.string().trim().max(120),
+  z.string().max(2000, "Config values must be 2000 characters or fewer"),
+);
+
+export const integrationSchemas = {
+  connect: z.object({
+    name: z.string().trim().max(120).optional(),
+    config: integrationConfigSchema.optional(),
+  }),
+  configure: z.object({
+    config: integrationConfigSchema.optional(),
   }),
 };

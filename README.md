@@ -33,31 +33,31 @@ The API will be available at `http://localhost:5000/api/v1`.
 
 ## Scripts
 
-| Command          | Description                                  |
-| ---------------- | -------------------------------------------- |
-| `npm run dev`    | Start with nodemon (auto-restart)            |
-| `npm start`      | Start in production mode                     |
-| `npm run seed`   | Seed the database (add `--force` to reset)   |
-| `npm test`       | Run tests (Node test runner)                 |
-| `npm run lint`   | Lint with ESLint                             |
+| Command        | Description                                |
+| -------------- | ------------------------------------------ |
+| `npm run dev`  | Start with nodemon (auto-restart)          |
+| `npm start`    | Start in production mode                   |
+| `npm run seed` | Seed the database (add `--force` to reset) |
+| `npm test`     | Run tests (Node test runner)               |
+| `npm run lint` | Lint with ESLint                           |
 
-## Demo accounts
+## Demo accounts (created by `npm run seed`, password `password123`)
 
-Demo accounts were removed in favor of real authentication. Accounts are created
-by registering through the app (or `POST /api/v1/auth/register`).
+| Email                       | Role              |
+| --------------------------- | ----------------- |
+| `owner@pharmahub.demo`      | Owner             |
+| `pharmacist@pharmahub.demo` | Pharmacist        |
+| `cashier@pharmahub.demo`    | Cashier           |
+| `inventory@pharmahub.demo`  | Inventory Manager |
 
 ## Quick smoke test
 
 ```bash
 curl http://localhost:5000/api/v1/health
 
-curl -X POST http://localhost:5000/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"you@example.com","password":"your-password"}'
-
 curl -X POST http://localhost:5000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"you@example.com","password":"your-password"}'
+  -d '{"email":"owner@pharmahub.demo","password":"password123"}'
 ```
 
 Use the returned `token` in the `Authorization: Bearer <token>` header for all
@@ -68,28 +68,6 @@ other endpoints.
 - [API.md](docs/API.md) — complete endpoint reference
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — folder structure and layering
 - [DATA_MODEL.md](docs/DATA_MODEL.md) — MongoDB collections and relationships
-
-## Deployment (Render)
-
-A push to `main` runs the CI + deploy workflow (`.github/workflows/deploy.yml`):
-lint and tests, then a deploy is triggered on Render via its REST API.
-
-**GitHub repository secrets** (Settings → Secrets and variables → Actions):
-
-| Secret              | Value                                                        |
-| ------------------- | ------------------------------------------------------------ |
-| `RENDER_API_KEY`    | Render.com → Account settings → API keys                     |
-| `RENDER_SERVICE_ID` | The `srv-...` ID from your Render service URL                 |
-
-**Render service env vars** (set in the Render dashboard):
-
-| Var         | Example                                            |
-| ----------- | -------------------------------------------------- |
-| `MONGO_URI` | `mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/pharmahub` |
-| `JWT_SECRET`| a long random string                                |
-
-The service definition is also version-controlled in [`render.yaml`](render.yaml)
-(web service, Node runtime, `npm start`, health check at `/api/v1/health`).
 
 ## Folder structure
 
