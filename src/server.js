@@ -3,7 +3,6 @@ import { connectDB, disconnectDB } from "./config/db.js";
 import { env } from "./config/env.js";
 import { logger } from "./core/logger.js";
 import { Role } from "./models/Role.js";
-import { ensureDevelopmentUser } from "./services/devUser.service.js";
 import { startScheduledReportWorker } from "./jobs/scheduledReports.job.js";
 import { validateEmailConfig } from "./services/mailer.js";
 
@@ -18,7 +17,6 @@ async function bootstrap() {
 
     await connectDB();
     await Role.ensureSystemRoles();
-    await ensureDevelopmentUser();
 
     await validateEmailConfig();
 
@@ -26,6 +24,12 @@ async function bootstrap() {
     const server = app.listen(env.port, () => {
       logger.info(`PharmaHub API running at http://localhost:${env.port} (${env.nodeEnv})`);
     });
+
+    // Scheduled report background worker — started only when the server is
+    // actually serving (never during tests).
+    if (!env.isTest) {
+      startScheduledReportWorker();
+    }
 
     const shutdown = async (signal) => {
       logger.info(`${signal} received — shutting down gracefully`);
@@ -44,7 +48,7 @@ async function bootstrap() {
     process.on("SIGINT", () => shutdown("SIGINT"));
   } catch (err) {
     logger.error(
-      "Failed to start server. Check the MongoDB configuration (MONGO_URL / MONGO_URI) in .env — the backend refuses to start without a valid database connection.",
+      "Failed to start server. Check the MongoDB configuration (MONGO_URI) in .env — the backend refuses to start without a valid database connection.",
       err,
     );
     process.exit(1);

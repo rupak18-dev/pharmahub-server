@@ -143,16 +143,6 @@ export const authSchemas = {
     currentPassword: z.string().min(1),
     newPassword: passwordSchema,
   }),
-  forgotPassword: z.object({
-    email: emailSchema,
-  }),
-  resetPassword: z.object({
-    token: z.string().trim().min(1),
-    newPassword: passwordSchema,
-  }),
-  demoLogin: z.object({
-    email: emailSchema,
-  }),
 };
 
 export const userSchemas = {

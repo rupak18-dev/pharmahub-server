@@ -1,5 +1,5 @@
-import bcrypt from "bcryptjs";
 
+import { randomUUID } from "node:crypto";
 import { connectDB, disconnectDB } from "../src/config/db.js";
 import { Category } from "../src/models/Category.js";
 import { Manufacturer } from "../src/models/Manufacturer.js";
@@ -353,11 +353,6 @@ async function run() {
   console.log(`  suppliers    : ${supDocs.length}`);
   console.log(`  medicines    : ${medDocs.length}`);
   console.log(`  batches      : ${batchCount}`);
-  console.log(`  users        : ${userCount} created`);
-  console.log("");
-  console.log("  Sign-in accounts (password: password123)");
-  console.log("  owner@pharmahub.demo   | pharmacist@pharmahub.demo");
-  console.log("  cashier@pharmahub.demo | inventory@pharmahub.demo");
 
   await disconnectDB();
 }

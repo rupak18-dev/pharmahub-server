@@ -18,6 +18,5 @@ export { Invitation } from "./Invitation.js";
 export { PasswordResetToken } from "./PasswordResetToken.js";
 export { ReportBill } from "./ReportBill.js";
 export { Integration } from "./Integration.js";
-export { DemoLoginToken } from "./DemoLoginToken.js";
 export { Otp } from "./Otp.js";
 export { Onboarding } from "./Onboarding.js";
