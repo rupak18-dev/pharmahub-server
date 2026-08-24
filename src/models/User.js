@@ -126,6 +126,11 @@ const userSchema = new Schema(
       trim: true,
     },
 
+    logoUrl: {
+      type: String,
+      trim: true,
+    },
+
     tagline: {
       type: String,
       trim: true,

@@ -294,6 +294,7 @@ export function toPublicUser(user) {
     phoneVerified: user.phoneVerified ?? false,
     phoneVerifiedAt: user.phoneVerifiedAt ?? null,
     avatarUrl: user.avatarUrl ?? null,
+    logoUrl: user.logoUrl ?? null,
     tagline: user.tagline ?? null,
     description: user.description ?? null,
     businessEmail: user.businessEmail ?? null,
