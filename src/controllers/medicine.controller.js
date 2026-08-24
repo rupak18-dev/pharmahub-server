@@ -7,8 +7,10 @@ import { Medicine } from "../models/Medicine.js";
 import { Batch } from "../models/Batch.js";
 import { recordAudit } from "../services/audit.service.js";
 import { getStockSummary } from "../services/stock.service.js";
+import { sweepExpiredBatches } from "../services/inventory.service.js";
 
 export const listMedicines = asyncHandler(async (req, res) => {
+  await sweepExpiredBatches();
   const { page, limit, skip } = buildPagination(req.query);
   const filter = cleanQuery(req.query);
   if (req.query.q) {

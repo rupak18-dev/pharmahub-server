@@ -1,15 +1,14 @@
 import { Router } from "express";
+import { validate } from "../middlewares/validate.js";
 import { auth } from "../middlewares/auth.js";
-import { ok } from "../core/responses.js";
+import { onboardingSchemas } from "../types/index.js";
+import * as onboardingController from "../controllers/onboarding.controller.js";
 
 const router = Router();
 
-router.get("/", auth, (req, res) => {
-  return ok(res, {}, "Onboarding data");
-});
+router.use(auth);
 
-router.put("/", auth, (req, res) => {
-  return ok(res, req.body, "Onboarding data saved");
-});
+router.get("/", onboardingController.get);
+router.put("/", validate(onboardingSchemas.upsert), onboardingController.save);
 
 export default router;

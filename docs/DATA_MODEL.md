@@ -44,11 +44,24 @@ Master product record. Includes enterprise fields mirrored from the frontend:
 `maxStockLevel`, `ptr`, `rackLocation`. Text index on `name/genericName/brandName`.
 
 ### batches
-`medicineId`, `batchNumber` (unique per medicine), `mfgDate`, `expiryDate`,
-`mrp`, `purchasePrice`, `sellingPrice`, `supplierId`, `currentStock`, `status`.
+Nested document shape agreed with the frontend contract
+(`src/lib/batch-schema.js`):
 
-`status` is auto-derived from `expiryDate`:
-`active` → `near_expiry` (within 90 days) → `expired`.
+- `medicineId`, `batchNumber` (unique per medicine), `supplierId`,
+  `batchType` (`C`/`L`/`V`)
+- `dates`: `manufacturingDate`, `expiryDate`, `quarantineUntil`
+- `pricing`: `purchasePrice`, `mrp`, `sellingPrice`, `gstRate`
+- `status`: `isRecalled`, `state`
+  (`ACTIVE`/`QUARANTINED`/`RECALLED`/`BLOCKED`/`RETIRED`), `quarantineReason`
+- `stock`: `uom`, `quantityOnHand`, `reservedQuantity`, `quarantined`
+- `warehouse`: `locationType`, `rackCode`
+- `audit` (`createdAt`, `updatedAt`, `updatedBy`), `version`,
+  `movements` (`{id, type, note, qty, timestamp, from, to, by}`)
+
+`status.state` is **manual** (set on create or via PATCH actions). Expiry-derived
+statuses (`near_expiry`, `expired`) are computed at read time from
+`dates.expiryDate` and are never stored. `scripts/migrate-batches.js` migrates
+the legacy flat shape in place (idempotent).
 
 ### inventoryItems
 One document per `(batchId, locationType, rackCode)`. `quantityOnHand` and

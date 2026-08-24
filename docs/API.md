@@ -64,11 +64,16 @@ List endpoints accept `?q=` for search and `?page=&limit=` for pagination.
 
 | Method | Path             | Permission      | Description                    |
 | ------ | ---------------- | --------------- | ------------------------------ |
-| GET    | `/batches`       | batches.view    | List batches (`?medicineId=`, `?status=`, `?expiryDate=`) |
-| POST   | `/batches`       | batches.create  | Create batch (status auto-computed from expiry) |
+| GET    | `/batches`       | batches.view    | List batches (`?medicineId=`, `?state=` → `status.state`, `?search=` → batchNumber, `?page=&limit=`) |
+| POST   | `/batches`       | batches.create  | Create batch (nested `dates/pricing/status/stock/warehouse`) |
 | GET    | `/batches/:id`   | batches.view    | Get batch + locations          |
-| PATCH  | `/batches/:id`   | batches.update  | Update batch                   |
+| PATCH  | `/batches/:id`   | batches.update  | Update: `action` (`quarantine`/`activate`/`recall`/`block`/`retire`) or nested field updates |
 | DELETE | `/batches/:id`   | batches.delete  | Delete batch (no stock allowed)|
+
+Batch documents use the nested contract (`dates`, `pricing`, `status.state`,
+`stock.quantityOnHand`, `warehouse`) and every response includes an `id` alias.
+`medicineId` is **not** populated so `medicineId` always matches the medicine's
+`_id`/`id`.
 
 ## Inventory
 

@@ -4,12 +4,25 @@ import { ApiError } from "../core/ApiError.js";
 import { Batch } from "../models/Batch.js";
 import { InventoryItem } from "../models/InventoryItem.js";
 import { InventoryLedger } from "../models/InventoryLedger.js";
+import { Medicine } from "../models/Medicine.js";
 import { StockMovement } from "../models/StockMovement.js";
 
 export async function ensureInventoryRecord({ batchId, locationType, rackCode }) {
   const existing = await InventoryItem.findOne({ batchId, locationType, rackCode });
   if (existing) return existing;
   return InventoryItem.create({ batchId, locationType, rackCode, quantityOnHand: 0 });
+}
+
+/**
+ * Propagates a stock delta to the medicine-level global total. Sellable stock
+ * only — expired batches are excluded (their quantity is written off by the
+ * expiry sweep instead).
+ */
+async function applyMedicineDelta(batch, delta, session) {
+  if (!delta) return;
+  const expired = new Date(batch.dates?.expiryDate).getTime() <= Date.now();
+  if (expired) return;
+  await Medicine.updateOne({ _id: batch.medicineId }, { $inc: { totalStock: delta } }, { session });
 }
 
 export async function addStock({ batchId, locationType, rackCode, quantity, referenceDocId, userId, userName, note }) {
@@ -28,8 +41,9 @@ export async function addStock({ batchId, locationType, rackCode, quantity, refe
         { new: true, session },
       );
 
-      batch.currentStock += quantity;
+      batch.stock.quantityOnHand += quantity;
       await batch.save({ session });
+      await applyMedicineDelta(batch, quantity, session);
 
       await InventoryLedger.create(
         [{ batchId, movementType: "Purchase Inward", quantityChange: quantity, userId, userName, referenceDocId, note }],
@@ -63,7 +77,9 @@ export async function removeStock({ batchId, locationType, rackCode, quantity, m
         { new: true, session },
       );
 
-      await Batch.findByIdAndUpdate(batchId, { $inc: { currentStock: -quantity } }, { session });
+      const batch = await Batch.findByIdAndUpdate(batchId, { $inc: { "stock.quantityOnHand": -quantity } }, { session });
+      if (batch) await applyMedicineDelta(batch, -quantity, session);
+
       await InventoryLedger.create(
         [{ batchId, movementType, quantityChange: -quantity, userId, userName, referenceDocId, note }],
         { session },
@@ -93,8 +109,9 @@ export async function adjustStock({ batchId, newQuantity, reason, userId, userNa
       const delta = newQuantity - oldQuantity;
       item = await InventoryItem.findByIdAndUpdate(record._id, { quantityOnHand: newQuantity }, { new: true, session });
 
-      batch.currentStock = Math.max(0, batch.currentStock + delta);
+      batch.stock.quantityOnHand = Math.max(0, batch.stock.quantityOnHand + delta);
       await batch.save({ session });
+      await applyMedicineDelta(batch, delta, session);
 
       await InventoryLedger.create(
         [{ batchId, movementType: "Stock Adjustment", quantityChange: delta, userId, userName, note: reason }],
@@ -111,4 +128,48 @@ export async function adjustStock({ batchId, newQuantity, reason, userId, userNa
   } finally {
     session.endSession();
   }
+}
+
+let lastSweepAt = 0;
+const SWEEP_INTERVAL_MS = 60 * 1000;
+
+/**
+ * Global expiry sweep. Retires ACTIVE batches whose expiry date has passed and
+ * writes their remaining quantity off the medicine-level sellable total.
+ * Throttled so it can be called opportunistically on read-heavy endpoints.
+ */
+export async function sweepExpiredBatches({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && now - lastSweepAt < SWEEP_INTERVAL_MS) return { skipped: true, retired: 0 };
+  lastSweepAt = now;
+
+  const expired = await Batch.find({
+    "status.state": "ACTIVE",
+    "dates.expiryDate": { $lte: new Date() },
+  })
+    .limit(500)
+    .lean();
+
+  let retired = 0;
+  for (const batch of expired) {
+    const qty = batch.stock?.quantityOnHand ?? 0;
+    await Batch.updateOne(
+      { _id: batch._id, "status.state": "ACTIVE" },
+      { $set: { "status.state": "RETIRED", "audit.updatedAt": new Date(), "audit.updatedBy": "Expiry Sweep" } },
+    );
+    if (qty > 0) {
+      await Medicine.updateOne({ _id: batch.medicineId }, { $inc: { totalStock: -Math.max(0, qty) } });
+      await InventoryLedger.create([
+        {
+          batchId: batch._id,
+          movementType: "Write Off",
+          quantityChange: -qty,
+          userName: "System",
+          note: `Batch ${batch.batchNumber} expired — removed from sellable stock`,
+        },
+      ]);
+    }
+    retired += 1;
+  }
+  return { skipped: false, retired };
 }

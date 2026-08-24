@@ -25,6 +25,7 @@ const medicineSchema = new Schema(
     contraindications: { type: String, trim: true },
     sideEffects: { type: String, trim: true },
     maxStockLevel: { type: Number, min: 0 },
+    totalStock: { type: Number, min: 0, default: 0, index: true },
     ptr: { type: Number, min: 0, default: 0 },
     rackLocation: { type: String, trim: true, maxlength: 40 },
   },

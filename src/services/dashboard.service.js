@@ -3,6 +3,7 @@ import { Medicine } from "../models/Medicine.js";
 import { Purchase } from "../models/Purchase.js";
 import { Sale } from "../models/Sale.js";
 import { Notification } from "../models/Notification.js";
+import { sweepExpiredBatches } from "./inventory.service.js";
 
 const startOfDay = (d = new Date()) => {
   const x = new Date(d);
@@ -10,7 +11,33 @@ const startOfDay = (d = new Date()) => {
   return x;
 };
 
+/** Cost of goods sold for a set of sales, using each sold batch's purchase price. */
+async function computeCostOfGoods(sales) {
+  const batchIds = [
+    ...new Set(
+      sales.flatMap((s) => s.items.map((i) => String(i.batchId)).filter(Boolean)),
+    ),
+  ];
+  if (batchIds.length === 0) return 0;
+  const batches = await Batch.find({ _id: { $in: batchIds } })
+    .select("pricing.purchasePrice")
+    .lean();
+  const costById = new Map(batches.map((b) => [String(b._id), b.pricing?.purchasePrice ?? 0]));
+  return round2(
+    sales.reduce(
+      (sum, s) => sum + s.items.reduce((a, i) => a + i.quantity * (costById.get(String(i.batchId)) ?? 0), 0),
+      0,
+    ),
+  );
+}
+
+function round2(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
 export async function dashboardStats() {
+  await sweepExpiredBatches();
+
   const today = startOfDay();
   const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
   const weekAgo = startOfDay(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
@@ -20,22 +47,34 @@ export async function dashboardStats() {
       Sale.find({ status: "completed", createdAt: { $gte: today, $lt: tomorrow } }).lean(),
       Sale.find({ status: "completed", createdAt: { $gte: weekAgo } }).lean(),
       Medicine.find({ isActive: true }).lean(),
-      Batch.find({ expiryDate: { $gt: new Date(), $lte: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000) } }).lean(),
-      Batch.countDocuments({ expiryDate: { $lt: new Date() } }),
+      Batch.find({ "dates.expiryDate": { $gt: new Date(), $lte: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000) } }).lean(),
+      Batch.countDocuments({ "dates.expiryDate": { $lt: new Date() } }),
       Medicine.countDocuments(),
       Purchase.countDocuments(),
     ]);
 
-  const batches = await Batch.find({}).lean();
+  const batches = await Batch.find({
+    "dates.expiryDate": { $gt: new Date() },
+    "status.state": { $nin: ["RETIRED", "RECALLED", "BLOCKED", "QUARANTINED"] },
+  }).lean();
   const stockByMedicine = new Map();
   for (const b of batches) {
-    stockByMedicine.set(String(b.medicineId), (stockByMedicine.get(String(b.medicineId)) ?? 0) + (b.currentStock ?? 0));
+    stockByMedicine.set(String(b.medicineId), (stockByMedicine.get(String(b.medicineId)) ?? 0) + (b.stock?.quantityOnHand ?? 0));
   }
   const lowStockList = lowStock.filter((m) => (stockByMedicine.get(String(m._id)) ?? 0) <= m.reorderThreshold);
 
-  const totalStock = batches.reduce((s, b) => s + (b.currentStock ?? 0), 0);
-  const stockValue = batches.reduce((s, b) => s + (b.currentStock ?? 0) * (b.purchasePrice ?? 0), 0);
+  const totalStock = batches.reduce((s, b) => s + (b.stock?.quantityOnHand ?? 0), 0);
+  const stockValue = batches.reduce((s, b) => s + (b.stock?.quantityOnHand ?? 0) * (b.pricing?.purchasePrice ?? 0), 0);
   const totalUnitsSoldToday = todaySales.reduce((s, x) => s + x.items.reduce((a, i) => a + i.quantity, 0), 0);
+
+  const [todayCost, weekCost, purchaseSpend] = await Promise.all([
+    computeCostOfGoods(todaySales),
+    computeCostOfGoods(weekSales),
+    Purchase.aggregate([
+      { $match: { status: "received", createdAt: { $gte: weekAgo } } },
+      { $group: { _id: null, total: { $sum: "$grandTotal" } } },
+    ]).then((r) => round2(r[0]?.total ?? 0)),
+  ]);
 
   const daily = [];
   for (let i = 6; i >= 0; i -= 1) {
@@ -59,10 +98,17 @@ export async function dashboardStats() {
       sales: todaySales.reduce((s, x) => s + x.grandTotal, 0),
       invoices: todaySales.length,
       units: totalUnitsSoldToday,
+      cost: todayCost,
+      profit: round2(todaySales.reduce((s, x) => s + x.grandTotal, 0) - todayCost),
     },
     week: {
       sales: weekSales.reduce((s, x) => s + x.grandTotal, 0),
       invoices: weekSales.length,
+      cost: weekCost,
+      profit: round2(weekSales.reduce((s, x) => s + x.grandTotal, 0) - weekCost),
+    },
+    purchases: {
+      spendWeek: purchaseSpend,
     },
     inventory: {
       totalMedicines,
@@ -80,15 +126,15 @@ export async function dashboardStats() {
 export async function getDashboardNotifications(limit = 20) {
   const lowStock = await getLowStockList();
   const expiring = await Batch.find({
-    expiryDate: { $gt: new Date(), $lte: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000) },
+    "dates.expiryDate": { $gt: new Date(), $lte: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000) },
   })
     .populate("medicineId", "name")
-    .sort({ expiryDate: 1 })
+    .sort({ "dates.expiryDate": 1 })
     .limit(limit)
     .lean();
-  const expired = await Batch.find({ expiryDate: { $lt: new Date() } })
+  const expired = await Batch.find({ "dates.expiryDate": { $lt: new Date() } })
     .populate("medicineId", "name")
-    .sort({ expiryDate: -1 })
+    .sort({ "dates.expiryDate": -1 })
     .limit(limit)
     .lean();
 
@@ -107,7 +153,7 @@ export async function getDashboardNotifications(limit = 20) {
     notifications.push({
       type: "expiry",
       title: "Batch expiring soon",
-      body: `${b.medicineId?.name ?? "Medicine"} · batch ${b.batchNumber} expires ${b.expiryDate.toISOString().slice(0, 10)}`,
+      body: `${b.medicineId?.name ?? "Medicine"} · batch ${b.batchNumber} expires ${new Date(b.dates?.expiryDate).toISOString().slice(0, 10)}`,
       entityType: "batch",
       entityId: String(b._id),
       createdAt: new Date(),
@@ -144,7 +190,7 @@ async function getLowStockList(limit = 50) {
   const batches = await Batch.find({}).lean();
   const stockByMedicine = new Map();
   for (const b of batches) {
-    stockByMedicine.set(String(b.medicineId), (stockByMedicine.get(String(b.medicineId)) ?? 0) + (b.currentStock ?? 0));
+    stockByMedicine.set(String(b.medicineId), (stockByMedicine.get(String(b.medicineId)) ?? 0) + (b.stock?.quantityOnHand ?? 0));
   }
   const list = medicines
     .filter((m) => (stockByMedicine.get(String(m._id)) ?? 0) <= m.reorderThreshold)

@@ -26,6 +26,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
   Admin: rolePermissions(() => all()),
   Pharmacist: rolePermissions((m) => {
     if (m === "sales") return { ...all(), delete: false, approve: false };
+    if (m === "purchases") return { ...view(), create: true, update: true };
     if (["medicines", "batches", "inventory", "expiry", "notifications"].includes(m))
       return { ...viewExport(), update: true };
     if (["dashboard", "reports", "ai"].includes(m)) return viewExport();
@@ -37,6 +38,7 @@ const DEFAULT_ROLE_PERMISSIONS = {
     return none();
   }),
   "Store Keeper": rolePermissions((m) => {
+    if (m === "purchases") return { ...view(), create: true, update: true };
     if (["inventory", "batches"].includes(m)) return { ...view(), create: true, update: true };
     if (["dashboard", "medicines", "expiry", "audit", "notifications"].includes(m)) return view();
     return none();
