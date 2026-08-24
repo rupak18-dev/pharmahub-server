@@ -87,8 +87,10 @@ export async function requestDemoLogin(email) {
     strength: 2,
   });
 
-  // For demo purposes, create a temporary user if they don't exist
-  if (!user) {
+  // Demo auto-provisioning exists ONLY when explicitly enabled via
+  // ENABLE_DEMO_ACCOUNTS=true outside production. Otherwise an existing
+  // account is required.
+  if (!user && env.enableDemoAccounts && !env.isProduction) {
     user = await User.create({
       name: normalizedEmail.split("@")[0],
       email: normalizedEmail,
@@ -96,6 +98,9 @@ export async function requestDemoLogin(email) {
       role: "Pharmacist",
       active: true,
     });
+  }
+  if (!user) {
+    throw ApiError.badRequest("No PharmaHub account exists for this email");
   }
 
   // Invalidate any previous unused tokens for this email
@@ -157,14 +162,14 @@ export async function verifyDemoLogin(rawToken) {
   record.used = true;
   await record.save();
 
-  // Find or create user
+  // Find or create user — auto-creation only when demo accounts are enabled.
   const normalizedEmail = record.email.toLowerCase();
   let user = await User.findOne({ email: normalizedEmail }).collation({
     locale: "en",
     strength: 2,
   });
 
-  if (!user) {
+  if (!user && env.enableDemoAccounts && !env.isProduction) {
     user = await User.create({
       name: normalizedEmail.split("@")[0],
       email: normalizedEmail,
@@ -172,6 +177,9 @@ export async function verifyDemoLogin(rawToken) {
       role: "Pharmacist",
       active: true,
     });
+  }
+  if (!user) {
+    throw ApiError.unauthorized("User account not found");
   }
 
   // Sign JWT

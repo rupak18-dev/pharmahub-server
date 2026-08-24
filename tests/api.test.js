@@ -76,7 +76,80 @@ describe(
       const body = await res.json();
       token = body.data.token;
       assert.ok(token);
-      assert.equal(body.data.user.role, "Pharmacist");
+      // Self-registered accounts are intentionally role-less until onboarding
+      // (job title) or an Owner assigns one — never a silent default.
+      assert.equal(body.data.user.role, "");
+    });
+
+    test("onboarding completion persists selected job title as the account role", async () => {
+      const ownerEmail = `wizard-owner-${Date.now()}@pharmahub.demo`;
+      await request("/auth/register", {
+        method: "POST",
+        body: { name: "Wizard Owner", email: ownerEmail, password: "password123" },
+      });
+      const login = await request("/auth/login", {
+        method: "POST",
+        body: { email: ownerEmail, password: "password123" },
+      });
+      const wizardToken = (await login.json()).data.token;
+
+      const save = await request("/onboarding", {
+        method: "PUT",
+        token: wizardToken,
+        body: {
+          personal: { firstName: "Wizard", lastName: "Owner", jobTitle: "Owner" },
+          workspace: { organizationName: `Wizard Org ${Date.now()}`, branchName: "HQ" },
+          onboarded: true,
+          completedAt: new Date().toISOString(),
+        },
+      });
+      assert.equal(save.status, 200);
+
+      // Role must be live on /auth/me immediately — no re-login required.
+      const me = await request("/auth/me", { token: wizardToken });
+      assert.equal(me.status, 200);
+      const body = await me.json();
+      assert.equal(body.data.role, "Owner");
+      assert.equal(body.data.onboarded, true);
+      assert.ok(body.data.orgName?.startsWith("Wizard Org"));
+      // Owner role defaults resolve into effective permissions.
+      assert.equal(body.data.permissions?.dashboard?.view, true);
+      assert.equal(body.data.permissions?.users?.create, true);
+      // roleId links to the seeded system Owner record.
+      const dbUser = await User.findOne({ email: ownerEmail }).lean();
+      assert.ok(dbUser.roleId, "roleId should reference the system Owner record");
+    });
+
+    test("second user selecting Pharmacist keeps roles isolated", async () => {
+      const pharmEmail = `wizard-pharmacist-${Date.now()}@pharmahub.demo`;
+      await request("/auth/register", {
+        method: "POST",
+        body: { name: "Wizard Pharmacist", email: pharmEmail, password: "password123" },
+      });
+      const login = await request("/auth/login", {
+        method: "POST",
+        body: { email: pharmEmail, password: "password123" },
+      });
+      const pharmacistToken = (await login.json()).data.token;
+
+      const save = await request("/onboarding", {
+        method: "PUT",
+        token: pharmacistToken,
+        body: {
+          personal: { firstName: "Wiz", lastName: "Pharm", jobTitle: "Pharmacist" },
+          workspace: { organizationName: "Other Org", branchName: "HQ" },
+          onboarded: true,
+          completedAt: new Date().toISOString(),
+        },
+      });
+      assert.equal(save.status, 200);
+
+      const me = await request("/auth/me", { token: pharmacistToken });
+      const body = await me.json();
+      assert.equal(body.data.role, "Pharmacist");
+      // Pharmacist defaults: can view dashboard but never manage users.
+      assert.equal(body.data.permissions?.dashboard?.view, true);
+      assert.equal(body.data.permissions?.users?.create, false);
     });
 
     test("get current user via /auth/me", async () => {

@@ -206,6 +206,7 @@ export const userSchemas = {
       businessHours: z.string().trim().max(500).optional(),
       metaPixelId: z.string().trim().max(200).optional(),
       branches: z.array(z.string().trim().max(200)).max(20).optional(),
+      onboarded: z.boolean().optional(),
     })
     .refine((v) => Object.keys(v).length > 0, "At least one field is required"),
 };

@@ -219,11 +219,12 @@ export const updateMyProfile = asyncHandler(async (req, res) => {
     ip: req.ip,
   });
 
-  return ok(
-    res,
-    { user: toPublicUser(user.toObject()), profileCompletion: completion },
-    "Profile updated",
-  );
+  // The response IS the refreshed identity — return the same enriched shape
+  // as GET /auth/me (role + effective permissions) so clients that replace
+  // their session user with this payload can never end up with empty
+  // role-default permissions after a save.
+  const publicUser = await toAuthUser(user.toObject());
+  return ok(res, { user: publicUser, profileCompletion: completion }, "Profile updated");
 });
 
 // PUT /users/me/avatar — multipart profile-image upload. The authenticated

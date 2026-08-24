@@ -39,10 +39,13 @@ const userSchema = new Schema(
       select: false,
     },
 
+    // Role is assigned EXPLICITLY — by the Owner via Users & Roles, or via
+    // the role carried on a staff invitation. There is intentionally NO
+    // default: self-registered / Google-provisioned accounts stay role-less
+    // (neutral) until someone assigns them a real role.
     role: {
       type: String,
-      required: true,
-      default: "Pharmacist",
+      default: "",
       index: true,
     },
 

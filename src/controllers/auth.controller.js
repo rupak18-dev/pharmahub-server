@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import { asyncHandler } from "../core/asyncHandler.js";
 import { ok, created } from "../core/responses.js";
+import { logger } from "../core/logger.js";
 import { env } from "../config/env.js";
 import {
   loginUser,
@@ -50,13 +51,20 @@ export const login = asyncHandler(async (req, res) => {
 // profile completion score. Delegates to the same enrichment logic used by
 // GET /users/me so the frontend always gets a consistent user shape.
 export const me = asyncHandler(async (req, res) => {
+  // Identity must never be served from any HTTP cache — a cached response
+  // could return the PREVIOUS user after a logout + different login.
+  res.set("Cache-Control", "no-store");
   const user = await User.findById(req.user._id).lean();
   if (!user) {
     // Middleware already verified the user exists; this is a safety fallback.
+    logger.warn(`[auth.me] token userId=${req.user._id} not found in database`);
     const publicUser = await toAuthUser(req.user);
     publicUser.profileCompletion = computeProfileCompletion(req.user);
     return ok(res, publicUser, "Current user");
   }
+  logger.info(
+    `[auth.me] session userId=${user._id} -> resolved id=${user._id} email=${user.email} role=${user.role}`,
+  );
   const publicUser = await toAuthUser(user);
   publicUser.profileCompletion = computeProfileCompletion(user);
   return ok(res, publicUser, "Current user");
@@ -171,12 +179,11 @@ export const googleCallback = asyncHandler(async (req, res) => {
   }
 
   if (!user) {
-    // Self-provisioning path — mirrors registerUser/demo provisioning: new
-    // accounts start as Pharmacists and finish setup through onboarding.
+    // Self-provisioning path — new Google accounts stay role-less (neutral)
+    // until the Owner explicitly assigns a role. Never a silent default.
     user = await User.create({
       name: profile.name,
       email: profile.email,
-      role: "Pharmacist",
       orgName: "PharmaHub Pharmacy",
       provider: "google",
       googleId: profile.googleId,

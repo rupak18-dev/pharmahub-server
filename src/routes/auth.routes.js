@@ -2,7 +2,7 @@ import { Router } from "express";
 
 import { validate } from "../middlewares/validate.js";
 import { auth } from "../middlewares/auth.js";
-import { authSchemas } from "../types/index.js";
+import { authSchemas, userSchemas } from "../types/index.js";
 import * as authController from "../controllers/auth.controller.js";
 
 const router = Router();
@@ -43,9 +43,12 @@ router.post(
 );
 
 // PUT /auth/profile — convenience alias used by the frontend auth service.
+// Validated with the same schema as PUT /users/me/profile; unknown fields
+// (role, permissions, ...) are stripped before they reach the controller.
 router.put(
   "/profile",
   auth,
+  validate(userSchemas.updateProfile),
   authController.updateMyProfile,
 );
 
