@@ -25,12 +25,22 @@ export const getManufacturer = asyncHandler(async (req, res) => {
 
 export const createManufacturer = asyncHandler(async (req, res) => {
   const item = await Manufacturer.create(req.body);
-  recordAudit({ userId: req.user?._id, userName: req.user?.name, action: "Manufacturer created", entityType: "manufacturer", entityId: item._id, ip: req.ip });
+  recordAudit({
+    userId: req.user?._id,
+    userName: req.user?.name,
+    action: "Manufacturer created",
+    entityType: "manufacturer",
+    entityId: item._id,
+    ip: req.ip,
+  });
   return created(res, item, "Manufacturer created");
 });
 
 export const updateManufacturer = asyncHandler(async (req, res) => {
-  const item = await Manufacturer.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+  const item = await Manufacturer.findByIdAndUpdate(req.params.id, req.body, {
+    new: true,
+    runValidators: true,
+  });
   if (!item) throw ApiError.notFound("Manufacturer not found");
   return ok(res, item, "Manufacturer updated");
 });

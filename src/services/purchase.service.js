@@ -8,7 +8,14 @@ import { addStock } from "./inventory.service.js";
 import { generateNumericId } from "../utils/id.js";
 import { round2 } from "../utils/date.js";
 
-export async function createPurchaseOrder({ supplierId, items, discount = 0, notes, createdBy, createdByName }) {
+export async function createPurchaseOrder({
+  supplierId,
+  items,
+  discount = 0,
+  notes,
+  createdBy,
+  createdByName,
+}) {
   const medicineIds = items.map((i) => i.medicineId);
   const meds = await Medicine.find({ _id: { $in: medicineIds } }).lean();
   const medMap = new Map(meds.map((m) => [String(m._id), m]));
@@ -29,9 +36,7 @@ export async function createPurchaseOrder({ supplierId, items, discount = 0, not
   });
 
   const subtotal = round2(orderItems.reduce((s, i) => s + i.lineTotal, 0));
-  const gstTotal = round2(
-    orderItems.reduce((s, i) => s + i.lineTotal * (i.gstRate / 100), 0),
-  );
+  const gstTotal = round2(orderItems.reduce((s, i) => s + i.lineTotal * (i.gstRate / 100), 0));
   const grandTotal = round2(subtotal - discount + gstTotal);
 
   const orderNo = `PO-${Date.now().toString().slice(-8)}-${generateNumericId(3)}`;
@@ -58,7 +63,8 @@ export async function receivePurchase(purchaseId, { items }, userId, userName) {
     await session.withTransaction(async () => {
       const purchase = await Purchase.findById(purchaseId).session(session);
       if (!purchase) throw ApiError.notFound("Purchase order not found");
-      if (purchase.status === "cancelled") throw ApiError.badRequest("Cannot receive a cancelled order");
+      if (purchase.status === "cancelled")
+        throw ApiError.badRequest("Cannot receive a cancelled order");
 
       const receivedByItem = new Map(items.map((i) => [String(i.itemId), i]));
       let allReceived = true;
@@ -67,7 +73,9 @@ export async function receivePurchase(purchaseId, { items }, userId, userName) {
         const incoming = receivedByItem.get(String(item._id));
         if (!incoming) continue;
         if (incoming.quantityReceived > item.quantity - item.quantityReceived) {
-          throw ApiError.badRequest(`Received quantity exceeds ordered quantity for item ${item._id}`);
+          throw ApiError.badRequest(
+            `Received quantity exceeds ordered quantity for item ${item._id}`,
+          );
         }
       }
 
@@ -85,34 +93,28 @@ export async function receivePurchase(purchaseId, { items }, userId, userName) {
 
         let batch = existingBatch;
         if (batch) {
-          batch.pricing.purchasePrice = item.unitCost;
-          if (incoming.mrp != null) batch.pricing.mrp = incoming.mrp;
-          if (incoming.sellingPrice != null) batch.pricing.sellingPrice = incoming.sellingPrice;
-          if (incoming.expiryDate) batch.dates.expiryDate = incoming.expiryDate;
+          batch.purchasePrice = item.unitCost;
+          if (incoming.mrp != null) batch.mrp = incoming.mrp;
+          if (incoming.sellingPrice != null) batch.sellingPrice = incoming.sellingPrice;
+          if (incoming.expiryDate) batch.expiryDate = incoming.expiryDate;
         } else {
           batch = await Batch.create(
-            [{
-              medicineId: item.medicineId,
-              batchNumber: incoming.batchNumber ?? `BATCH-${generateNumericId(6)}`,
-              batchType: "C",
-              dates: {
-                manufacturingDate: incoming.mfgDate ?? new Date(),
+            [
+              {
+                medicineId: item.medicineId,
+                batchNumber: incoming.batchNumber ?? `BATCH-${generateNumericId(6)}`,
+                mfgDate: incoming.mfgDate ?? new Date(),
                 expiryDate: incoming.expiryDate ?? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-              },
-              pricing: {
-                purchasePrice: item.unitCost,
                 mrp: incoming.mrp ?? 0,
+                purchasePrice: item.unitCost,
                 sellingPrice: incoming.sellingPrice ?? round2(item.unitCost * 1.2),
-                gstRate: item.gstRate ?? 0,
-              },
-              status: { state: "ACTIVE" },
-              stock: { uom: "Units", quantityOnHand: 0, reservedQuantity: 0, quarantined: 0 },
-              warehouse: {
+                supplierId: purchase.supplierId,
+                currentStock: 0,
+                status: "active",
                 locationType: incoming.locationType ?? "Front Shelf",
                 rackCode: incoming.rackCode ?? "UNASSIGNED",
               },
-              supplierId: purchase.supplierId,
-            }],
+            ],
             { session },
           );
           batch = batch[0];
@@ -135,7 +137,10 @@ export async function receivePurchase(purchaseId, { items }, userId, userName) {
       purchase.status = allReceived ? "received" : "partially_received";
       purchase.receivedAt = new Date();
       await purchase.save({ session });
-      result = { purchase: await Purchase.findById(purchaseId).populate("supplierId").session(session), allReceived };
+      result = {
+        purchase: await Purchase.findById(purchaseId).populate("supplierId").session(session),
+        allReceived,
+      };
     });
     return result;
   } finally {

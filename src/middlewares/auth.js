@@ -13,14 +13,14 @@ export const auth = asyncHandler(async (req, _res, next) => {
 
   let payload;
   try {
-    payload = jwt.verify(token, env.jwtSecret);
+    payload = jwt.verify(token, env.jwtSecret, { algorithms: ["HS256"] });
   } catch {
     throw ApiError.unauthorized("Invalid or expired token");
   }
 
   const user = await User.findById(payload.sub).lean();
-  if (!user || !user.active) {
-    throw ApiError.unauthorized("User not found or deactivated");
+  if (!user || !user.active || user.status === "removed") {
+    throw ApiError.unauthorized("User account is inactive or removed");
   }
 
   req.user = user;

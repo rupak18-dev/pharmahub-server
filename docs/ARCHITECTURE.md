@@ -33,15 +33,15 @@ routes ──> controllers ──> services ──> models ──> MongoDB
 
 ## Key services
 
-| Service                | Responsibility                                            |
-| ---------------------- | --------------------------------------------------------- |
+| Service                | Responsibility                                                            |
+| ---------------------- | ------------------------------------------------------------------------- |
 | `sale.service.js`      | FEFO batch picking, stock deduction, invoice totals, void (restore stock) |
-| `purchase.service.js`  | Purchase orders, GRN receiving → creates batches + stock  |
-| `inventory.service.js` | Stock add/remove/adjust inside Mongo transactions, ledger + movements |
-| `batch.service.js`     | Auto-classify batch status from expiry dates              |
-| `report.service.js`    | Sales/purchase/expiry/stock valuation aggregates          |
-| `dashboard.service.js` | Today/week metrics, sales trend, alerts                   |
-| `audit.service.js`     | Non-blocking audit trail writes                           |
+| `purchase.service.js`  | Purchase orders, GRN receiving → creates batches + stock                  |
+| `inventory.service.js` | Stock add/remove/adjust inside Mongo transactions, ledger + movements     |
+| `batch.service.js`     | Auto-classify batch status from expiry dates                              |
+| `report.service.js`    | Sales/purchase/expiry/stock valuation aggregates                          |
+| `dashboard.service.js` | Today/week metrics, sales trend, alerts                                   |
+| `audit.service.js`     | Non-blocking audit trail writes                                           |
 
 ## Transactions
 
