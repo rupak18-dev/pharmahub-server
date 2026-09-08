@@ -15,3 +15,11 @@ services:
         sync: false
       - key: JWT_SECRET
         generateValue: true
+      - key: CORS_ORIGIN
+        value: "https://pharmahub-co.vercel.app"
+      - key: FRONTEND_URL
+        value: "https://pharmahub-co.vercel.app"
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false

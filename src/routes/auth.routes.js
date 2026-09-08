@@ -19,37 +19,18 @@ router.post(
   authController.login,
 );
 
-router.post(
-  "/demo-login",
-  validate(authSchemas.demoLogin),
-  authController.demoLogin,
-);
-
-router.post(
-  "/demo-login/verify",
-  validate(authSchemas.demoLoginVerify),
-  authController.demoLoginVerify,
-);
-
 router.get("/me", auth, authController.me);
-
-router.post("/logout", auth, authController.logout);
-
+router.put("/profile", auth, validate(authSchemas.profile), authController.updateMyProfile);
+router.post("/change-password", auth, validate(authSchemas.changePassword), authController.updatePassword);
 router.post(
-  "/change-password",
-  auth,
-  validate(authSchemas.changePassword),
-  authController.updatePassword,
+  "/forgot-password",
+  validate(authSchemas.forgotPassword),
+  authController.forgotPassword,
 );
-
-// PUT /auth/profile — convenience alias used by the frontend auth service.
-// Validated with the same schema as PUT /users/me/profile; unknown fields
-// (role, permissions, ...) are stripped before they reach the controller.
-router.put(
-  "/profile",
-  auth,
-  validate(userSchemas.updateProfile),
-  authController.updateMyProfile,
+router.post(
+  "/reset-password",
+  validate(authSchemas.resetPassword),
+  authController.resetPassword,
 );
 
 // Google OAuth

@@ -16,8 +16,5 @@ export function created(res, data = null, message = "Created") {
 }
 
 export function noContent(res) {
-  return res.status(204).json({
-    success: true,
-    data: null,
-  });
+  return res.status(204).end();
 }

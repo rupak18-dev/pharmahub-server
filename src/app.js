@@ -9,6 +9,7 @@ import { env } from "./config/env.js";
 import { constants } from "./config/constants.js";
 import apiRoutes from "./routes/index.js";
 import { notFound, errorHandler } from "./middlewares/errorHandler.js";
+import { csrfOriginGuard } from "./middlewares/csrf.js";
 import { stream } from "./core/logger.js";
 
 export function createApp() {
@@ -50,6 +51,23 @@ export function createApp() {
   );
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: true }));
+
+  // CSRF protection for cookie-authenticated mutations:
+  // 1) Our SPA marks every API call with a custom header that cross-site form
+  //    posts cannot add. Plain GETs are exempt.
+  // 2) In production, a present Origin/Referer must match the CORS allowlist
+  //    (see csrfOriginGuard).
+  app.use((req, res, next) => {
+    if (!["POST", "PATCH", "PUT", "DELETE"].includes(req.method)) return next();
+    if (req.get("x-pharmahub-client") === "web") return next();
+    // The automated test suite exercises the API directly without a browser.
+    if (env.isTest) return next();
+    return res.status(403).json({
+      success: false,
+      error: { message: "Missing required client header." },
+    });
+  });
+  app.use(csrfOriginGuard);
 
   if (!env.isTest) {
     app.use(morgan(env.isProduction ? "combined" : "dev", { stream }));

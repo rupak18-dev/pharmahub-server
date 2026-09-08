@@ -9,17 +9,19 @@ import {
   registerUser,
   changePassword,
   toAuthUser,
+  setSessionCookie,
+  clearSessionCookie,
   issueToken,
+  resetPassword as resetPasswordService,
 } from "../services/auth.service.js";
 import {
   googleAuthUrl,
   exchangeCodeForProfile,
 } from "../services/googleAuth.service.js";
-import { requestDemoLogin, verifyDemoLogin } from "../services/demo-login.service.js";
+import { createAndSendOtp } from "../services/otp.service.js";
 import { recordAudit } from "../services/audit.service.js";
 import { computeProfileCompletion } from "../services/profileCompletion.service.js";
 import { User } from "../models/User.js";
-import { updateMyProfile as _updateMyProfile } from "./user.controller.js";
 
 export const register = asyncHandler(async (req, res) => {
   const result = await registerUser(req.body);
@@ -36,6 +38,7 @@ export const register = asyncHandler(async (req, res) => {
 
 export const login = asyncHandler(async (req, res) => {
   const result = await loginUser(req.body);
+  setSessionCookie(res, result.token, { remember: req.body.remember ?? true });
   recordAudit({
     userId: result.user.id,
     userName: result.user.name,
@@ -44,7 +47,8 @@ export const login = asyncHandler(async (req, res) => {
     entityId: result.user.id,
     ip: req.ip,
   });
-  return ok(res, result, "Login successful");
+  // Session JWT travels as an httpOnly cookie — never in the response body.
+  return ok(res, { user: result.user }, "Login successful");
 });
 
 // GET /auth/me — returns the current user with full effective permissions and
@@ -70,10 +74,8 @@ export const me = asyncHandler(async (req, res) => {
   return ok(res, publicUser, "Current user");
 });
 
-// POST /auth/logout — JWT is stateless; logout is handled by the frontend
-// clearing its stored token. This endpoint exists so the frontend can call it
-// without receiving a 404 and still records the logout in the audit log.
 export const logout = asyncHandler(async (req, res) => {
+  clearSessionCookie(res);
   recordAudit({
     userId: req.user?._id,
     userName: req.user?.name,
@@ -90,49 +92,54 @@ export const updatePassword = asyncHandler(async (req, res) => {
   return ok(res, null, "Password updated");
 });
 
-export const demoLogin = asyncHandler(async (req, res) => {
-  const result = await requestDemoLogin(req.body.email);
-  return ok(res, result, "Demo login link sent to your email");
+export const forgotPassword = asyncHandler(async (req, res) => {
+  const email = req.body.email.toLowerCase();
+  const user = await User.findOne({ email })
+    .collation({ locale: "en", strength: 2 })
+    .select("_id active")
+    .lean();
+  if (user?.active) {
+    await createAndSendOtp({
+      email,
+      purpose: "password_reset",
+      subject: "Reset your PharmaHub password",
+      html: `<p>We received a request to reset your PharmaHub password. Enter this code to continue:</p>
+<p style="font-size:24px;font-weight:bold;letter-spacing:4px">{{code}}</p>
+<p>The code expires in 10 minutes. If you didn't request a reset, you can ignore this email.</p>`,
+    });
+  }
+  // Same response whether or not the account exists — no account enumeration.
+  return ok(res, null, "If that email belongs to an account, a reset code is on its way.");
 });
 
-export const demoLoginVerify = asyncHandler(async (req, res) => {
-  const result = await verifyDemoLogin(req.body.token);
+export const resetPassword = asyncHandler(async (req, res) => {
+  const userId = await resetPasswordService(req.body);
   recordAudit({
-    userId: result.user.id,
-    userName: result.user.name,
-    action: "Demo login verified",
+    userId,
+    action: "Password reset via email code",
     entityType: "user",
-    entityId: result.user.id,
+    entityId: userId,
     ip: req.ip,
   });
-  return ok(res, result, "Login successful");
+  return ok(res, null, "Password updated. You can sign in with your new password.");
 });
 
 // PUT /auth/profile — convenience alias for PUT /users/me/profile so the
 // frontend auth service does not need to know about the /users prefix.
-export const updateMyProfile = _updateMyProfile;
+export { updateMyProfile } from "./user.controller.js";
 
 // ── Google sign-in (OAuth 2.0) ───────────────────────────────────────────────
-// The browser is redirected to the backend, so the session token travels back
-// to the SPA through the URL fragment of ${frontendUrl}/auth/callback — the
-// frontend GoogleCallbackPage parses `#token=...&user=<base64url json>`.
-
+// The browser is redirected to the backend, which sets the session as an
+// httpOnly cookie before bouncing back to the SPA — no token in any URL.
 const OAUTH_STATE_COOKIE = env.google.stateCookieName ?? "google_oauth_state";
 const OAUTH_STATE_MAX_AGE_MS = 10 * 60 * 1000;
 
-function base64UrlJson(value) {
-  return Buffer.from(JSON.stringify(value)).toString("base64url");
-}
-
 // Redirect target handed back to the SPA after a Google flow finishes
-// (successfully or not). Keeping every outcome inside the hash means tokens
-// and errors never reach server logs or referrer headers.
-function googleResultRedirect({ token, user, error } = {}) {
-  const params = new URLSearchParams();
-  if (token) params.set("token", token);
-  if (user) params.set("user", base64UrlJson(user));
-  if (error) params.set("error", error);
-  return `${env.frontendUrl}/auth/callback#${params.toString()}`;
+// (successfully or not). The session itself is set as an httpOnly cookie by
+// the callback before redirecting, so no token ever appears in the URL.
+function googleResultRedirect({ error } = {}) {
+  const suffix = error ? `?error=${encodeURIComponent(error)}` : "";
+  return `${env.frontendUrl}/auth/callback${suffix}`;
 }
 
 // GET /auth/google — kicks off the consent redirect with a CSRF state cookie.
@@ -208,7 +215,7 @@ export const googleCallback = asyncHandler(async (req, res) => {
   });
 
   const token = issueToken(user._id);
-  const publicUser = await toAuthUser(user.toObject());
-  publicUser.profileCompletion = computeProfileCompletion(user);
-  return res.redirect(googleResultRedirect({ token, user: publicUser }));
+  // Session travels as an httpOnly cookie; the SPA hydrates via GET /auth/me.
+  setSessionCookie(res, token);
+  return res.redirect(googleResultRedirect({}));
 });
