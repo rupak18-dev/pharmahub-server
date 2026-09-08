@@ -34,6 +34,7 @@ const PROFILE_EDITABLE_FIELDS = [
   "email",
   "phone",
   "orgName",
+  "role",
   "tagline",
   "description",
   "businessEmail",

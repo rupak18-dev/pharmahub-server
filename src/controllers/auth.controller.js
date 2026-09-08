@@ -32,6 +32,9 @@ export const register = asyncHandler(async (req, res) => {
     entityId: result.user?.id,
     ip: req.ip,
   });
+  // Issue the session cookie immediately so a fresh signup is authenticated and
+  // can go straight into onboarding — mirroring login. The token stays httpOnly.
+  setSessionCookie(res, result.token, { remember: true });
   return created(res, result.user, "Registration successful. Please sign in.");
 });
 
