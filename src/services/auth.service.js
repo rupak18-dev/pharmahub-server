@@ -315,6 +315,8 @@ export function toPublicUser(user) {
     accessIds: user.accessIds ?? [],
     department: user.department ?? null,
     designation: user.designation ?? null,
+    invitedBy: user.invitedBy ? String(user.invitedBy) : null,
+    createdBy: user.createdBy ? String(user.createdBy) : null,
     profileCompletion: user.profileCompletion ?? null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,

@@ -152,32 +152,33 @@ export const userSchemas = {
   }),
   update: z
     .object({
-      name: z.string().trim().min(1).max(120).optional(),
+      name: z.string().trim().min(1).max(120).optional().nullable(),
       role: z.string().trim().min(1).optional(),
       active: z.boolean().optional(),
       status: z.enum(["active", "suspended", "inactive"]).optional(),
-      phone: updatePhoneSchema,
-      email: emailSchema.optional(),
-      permissions: z.record(z.string(), z.record(z.string(), z.boolean())).optional(),
-      featureAccess: z.record(z.string(), z.boolean()).optional(),
-      accessIds: z.array(z.string().trim().min(1).max(80)).optional(),
-      department: z.string().trim().max(120).optional(),
-      designation: z.string().trim().max(120).optional(),
+      phone: updatePhoneSchema.or(z.literal("")).optional().nullable(),
+      email: emailSchema.optional().nullable(),
+      permissions: z.record(z.string(), z.record(z.string(), z.boolean())).optional().nullable(),
+      featureAccess: z.record(z.string(), z.boolean()).optional().nullable(),
+      accessIds: z.array(z.string().trim().min(1).max(80)).optional().nullable(),
+      department: z.string().trim().max(120).optional().nullable().or(z.literal("")),
+      designation: z.string().trim().max(120).optional().nullable().or(z.literal("")),
     })
     .refine((v) => Object.keys(v).length > 0, "At least one field is required"),
   invite: z.object({
-    name: z.string().trim().max(120).optional(),
+    name: z.string().trim().max(120).optional().nullable().or(z.literal("")),
     email: emailSchema,
     role: z.string().trim().min(1),
-    phone: phoneSchema,
-    department: z.string().trim().max(120).optional(),
-    message: z.string().trim().max(500).optional(),
+    phone: phoneSchema.or(z.literal("")).optional().nullable(),
+    department: z.string().trim().max(120).optional().nullable().or(z.literal("")),
+    designation: z.string().trim().max(120).optional().nullable().or(z.literal("")),
+    message: z.string().trim().max(500).optional().nullable().or(z.literal("")),
     // Per-user permission overrides (module -> action flags). Any shape that
     // passes through is re-sanitized server-side against the canonical module
     // and action lists, so a loose schema here is acceptable.
-    permissions: z.record(z.string(), z.record(z.string(), z.boolean())).optional(),
-    featureAccess: z.record(z.string(), z.boolean()).optional(),
-    accessIds: z.array(z.string().trim().min(1).max(80)).optional(),
+    permissions: z.record(z.string(), z.record(z.string(), z.boolean())).optional().nullable(),
+    featureAccess: z.record(z.string(), z.boolean()).optional().nullable(),
+    accessIds: z.array(z.string().trim().min(1).max(80)).optional().nullable(),
   }),
   acceptInvitation: z.object({
     token: z.string().trim().min(1),

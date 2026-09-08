@@ -110,6 +110,20 @@ const userSchema = new Schema(
       default: null,
     },
 
+    invitedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true,
+    },
+
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true,
+    },
+
     phoneVerified: {
       type: Boolean,
       default: false,
