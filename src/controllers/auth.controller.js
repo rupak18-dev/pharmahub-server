@@ -47,8 +47,7 @@ export const login = asyncHandler(async (req, res) => {
     entityId: result.user.id,
     ip: req.ip,
   });
-  // Session JWT travels as an httpOnly cookie — never in the response body.
-  return ok(res, { user: result.user }, "Login successful");
+  return ok(res, { token: result.token, user: result.user }, "Login successful");
 });
 
 // GET /auth/me — returns the current user with full effective permissions and
