@@ -1,5 +1,5 @@
-import bcrypt from "bcryptjs";
 
+import { randomUUID } from "node:crypto";
 import { connectDB, disconnectDB } from "../src/config/db.js";
 import { Category } from "../src/models/Category.js";
 import { Manufacturer } from "../src/models/Manufacturer.js";
@@ -37,9 +37,24 @@ const manufacturers = [
 ];
 
 const suppliers = [
-  { name: "MedSupply Co.", contactInfo: "orders@medsupply.example", gstNumber: "27ABCDE1234F1Z5", paymentTerms: "Net 30" },
-  { name: "HealthDist Ltd.", contactInfo: "orders@healthdist.example", gstNumber: "29PQRST9876G2Z9", paymentTerms: "Net 15" },
-  { name: "CureWell Distributors", contactInfo: "orders@curewell.example", gstNumber: "24GHIJK5678H3X4", paymentTerms: "Net 30" },
+  {
+    name: "MedSupply Co.",
+    contactInfo: "orders@medsupply.example",
+    gstNumber: "27ABCDE1234F1Z5",
+    paymentTerms: "Net 30",
+  },
+  {
+    name: "HealthDist Ltd.",
+    contactInfo: "orders@healthdist.example",
+    gstNumber: "29PQRST9876G2Z9",
+    paymentTerms: "Net 15",
+  },
+  {
+    name: "CureWell Distributors",
+    contactInfo: "orders@curewell.example",
+    gstNumber: "24GHIJK5678H3X4",
+    paymentTerms: "Net 30",
+  },
 ];
 
 const seedMedicines = [
@@ -235,8 +250,22 @@ async function run() {
     medDocs.push(med);
   }
 
-  const locationPool = ["Front Shelf", "Front Shelf", "Backroom", "Cold Storage", "Front Shelf", "Backroom"];
-  const rackPool = ["Aisle A, Shelf 1", "Aisle A, Shelf 2", "Backroom Rack 1", "Cold Room 1", "Aisle B, Shelf 1", "Backroom Rack 2"];
+  const locationPool = [
+    "Front Shelf",
+    "Front Shelf",
+    "Backroom",
+    "Cold Storage",
+    "Front Shelf",
+    "Backroom",
+  ];
+  const rackPool = [
+    "Aisle A, Shelf 1",
+    "Aisle A, Shelf 2",
+    "Backroom Rack 1",
+    "Cold Room 1",
+    "Aisle B, Shelf 1",
+    "Backroom Rack 2",
+  ];
 
   let batchCount = 0;
   for (let i = 0; i < medDocs.length; i += 1) {
@@ -258,17 +287,46 @@ async function run() {
     });
     batchCount += 1;
 
-    await Batch.create({
+    const secondQty = Math.max(0, Math.round(stockQty / 3));
+    const secondBatch = await Batch.create({
       medicineId: med._id,
       batchNumber: `${med.prefix}-${String(new Date().getFullYear()).slice(-2)}02-${String(i + 1).padStart(2, "0")}`,
-      mfgDate: daysFromNow(-300),
-      expiryDate: daysFromNow(90),
-      mrp: 40 + i * 15,
-      purchasePrice: 25 + i * 10,
-      sellingPrice: 38 + i * 14,
+      batchType: "C",
+      dates: {
+        manufacturingDate: daysFromNow(-300),
+        expiryDate: daysFromNow(90),
+        quarantineUntil: null,
+      },
+      pricing: {
+        purchasePrice: 25 + i * 10,
+        mrp: 40 + i * 15,
+        sellingPrice: 38 + i * 14,
+        gstRate: med.gstRate ?? 12,
+      },
+      status: { isRecalled: false, state: "ACTIVE", quarantineReason: null },
+      stock: {
+        uom: "Units",
+        quantityOnHand: secondQty,
+        reservedQuantity: 0,
+        quarantined: 0,
+      },
+      warehouse: {
+        locationType: locationPool[(i + 1) % locationPool.length],
+        rackCode: rackPool[(i + 1) % rackPool.length],
+      },
       supplierId: supDocs[(i + 1) % 2]._id,
-      currentStock: Math.max(0, Math.round(stockQty / 3)),
-      status: "near_expiry",
+      audit: { createdAt: new Date(), updatedAt: new Date(), updatedBy: "seed" },
+      version: 1,
+      movements: [
+        {
+          id: randomUUID(),
+          type: "created",
+          note: "Batch seeded",
+          qty: secondQty,
+          timestamp: new Date(),
+          by: "seed",
+        },
+      ],
     });
     batchCount += 1;
 
@@ -279,24 +337,14 @@ async function run() {
       quantityOnHand: stockQty,
       reservedQuantity: 0,
     });
-  }
 
-  const users = [
-    { name: "Store Owner", email: "owner@pharmahub.demo", role: "Owner", orgName: "PharmaHub" },
-    { name: "Demo Pharmacist", email: "pharmacist@pharmahub.demo", role: "Pharmacist", orgName: "PharmaHub" },
-    { name: "Demo Cashier", email: "cashier@pharmahub.demo", role: "Cashier", orgName: "PharmaHub" },
-    { name: "Inventory Manager", email: "inventory@pharmahub.demo", role: "Inventory Manager", orgName: "PharmaHub" },
-  ];
-  let userCount = 0;
-  for (const u of users) {
-    const exists = await User.findOne({ email: u.email });
-    if (!exists) {
-      await User.create({
-        ...u,
-        passwordHash: await bcrypt.hash("password123", 10),
-      });
-      userCount += 1;
-    }
+    await InventoryItem.create({
+      batchId: secondBatch._id,
+      locationType: locationPool[(i + 1) % locationPool.length],
+      rackCode: rackPool[(i + 1) % rackPool.length],
+      quantityOnHand: secondQty,
+      reservedQuantity: 0,
+    });
   }
 
   console.log("[seed] done");
@@ -305,11 +353,6 @@ async function run() {
   console.log(`  suppliers    : ${supDocs.length}`);
   console.log(`  medicines    : ${medDocs.length}`);
   console.log(`  batches      : ${batchCount}`);
-  console.log(`  users        : ${userCount} created`);
-  console.log("");
-  console.log("  Sign-in accounts (password: password123)");
-  console.log("  owner@pharmahub.demo   | pharmacist@pharmahub.demo");
-  console.log("  cashier@pharmahub.demo | inventory@pharmahub.demo");
 
   await disconnectDB();
 }

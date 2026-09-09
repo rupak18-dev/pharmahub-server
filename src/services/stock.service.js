@@ -4,7 +4,9 @@ import { InventoryItem } from "../models/InventoryItem.js";
 
 export async function getStockSummary(medicineId) {
   const batches = await Batch.find({ medicineId }).sort({ expiryDate: 1 }).lean();
-  const inventory = await InventoryItem.find({ batchId: { $in: batches.map((b) => b._id) } }).lean();
+  const inventory = await InventoryItem.find({
+    batchId: { $in: batches.map((b) => b._id) },
+  }).lean();
 
   const total = inventory.reduce((sum, i) => sum + i.quantityOnHand, 0);
   const reserved = inventory.reduce((sum, i) => sum + i.reservedQuantity, 0);

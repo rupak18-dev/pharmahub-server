@@ -12,8 +12,18 @@ router.use(auth);
 
 router.get("/", authorize("medicines", "view"), manufacturerController.listManufacturers);
 router.get("/:id", authorize("medicines", "view"), manufacturerController.getManufacturer);
-router.post("/", authorize("medicines", "create"), validate(manufacturerSchemas.create), manufacturerController.createManufacturer);
-router.patch("/:id", authorize("medicines", "update"), validate(manufacturerSchemas.update), manufacturerController.updateManufacturer);
+router.post(
+  "/",
+  authorize("medicines", "create"),
+  validate(manufacturerSchemas.create),
+  manufacturerController.createManufacturer,
+);
+router.patch(
+  "/:id",
+  authorize("medicines", "update"),
+  validate(manufacturerSchemas.update),
+  manufacturerController.updateManufacturer,
+);
 router.delete("/:id", authorize("medicines", "delete"), manufacturerController.deleteManufacturer);
 
 export default router;

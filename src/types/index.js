@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { normalizeIndianPhone } from "../utils/phone.js";
+
 /**
  * @typedef {import("mongoose").Document} MongooseDocument
  *
@@ -93,17 +95,49 @@ const idsSchema = () =>
 const emailSchema = z.string().trim().email("Invalid email").max(160);
 const passwordSchema = z.string().min(6, "Password must be at least 6 characters").max(128);
 
+// Optional Indian mobile number: accepts "+91 98765 43210", "98765 43210" or
+// "+919876543210" and normalizes to "+919876543210". Empty/absent is allowed.
+const phoneSchema = z
+  .string()
+  .trim()
+  .max(20, "Phone number is too long")
+  .optional()
+  .refine(
+    (v) => !v || /^(?:\+91)?[6-9]\d{9}$/.test(v.replace(/[\s\-().]/g, "")),
+    "Enter a valid Indian mobile number (10 digits starting with 6–9, e.g. +91 98765 43210)",
+  )
+  .transform((v) => (v ? normalizeIndianPhone(v) : v));
+
+// Lenient phone schema for PATCH updates: accepts any non-empty string up to
+// 20 chars without enforcing Indian format. This prevents stored phones in
+// non-Indian formats from blocking unrelated field updates.
+const updatePhoneSchema = z.string().trim().max(20, "Phone number is too long").optional();
+
 export const authSchemas = {
   register: z.object({
     name: z.string().trim().min(1, "Name is required").max(120),
     email: emailSchema,
     password: passwordSchema,
-    role: z.string().trim().optional(),
     orgName: z.string().trim().optional(),
   }),
   login: z.object({
     email: emailSchema,
     password: z.string().min(1, "Password is required"),
+    remember: z.boolean().optional(),
+  }),
+  forgotPassword: z.object({
+    email: emailSchema,
+  }),
+  resetPassword: z.object({
+    email: emailSchema,
+    code: z.string().trim().regex(/^\d{6}$/, "Enter the 6-digit code from your email"),
+    newPassword: passwordSchema,
+  }),
+  profile: z.object({
+    name: z.string().trim().min(1, "Name is required").max(120).optional(),
+    role: z.enum(["Owner", "Admin", "Pharmacist", "Cashier", "Store Keeper", "Inventory Manager"]).optional(),
+    orgName: z.string().trim().max(120).optional(),
+    onboarded: z.boolean().optional(),
   }),
   changePassword: z.object({
     currentPassword: z.string().min(1),
@@ -118,12 +152,68 @@ export const userSchemas = {
     password: passwordSchema,
     role: z.string().trim().min(1),
     orgName: z.string().trim().optional(),
+    phone: phoneSchema,
   }),
   update: z
     .object({
-      name: z.string().trim().min(1).max(120).optional(),
+      name: z.string().trim().min(1).max(120).optional().nullable(),
       role: z.string().trim().min(1).optional(),
       active: z.boolean().optional(),
+      status: z.enum(["active", "suspended", "inactive"]).optional(),
+      phone: updatePhoneSchema.or(z.literal("")).optional().nullable(),
+      email: emailSchema.optional().nullable(),
+      permissions: z.record(z.string(), z.record(z.string(), z.boolean())).optional().nullable(),
+      featureAccess: z.record(z.string(), z.boolean()).optional().nullable(),
+      accessIds: z.array(z.string().trim().min(1).max(80)).optional().nullable(),
+      department: z.string().trim().max(120).optional().nullable().or(z.literal("")),
+      designation: z.string().trim().max(120).optional().nullable().or(z.literal("")),
+    })
+    .refine((v) => Object.keys(v).length > 0, "At least one field is required"),
+  invite: z.object({
+    name: z.string().trim().max(120).optional().nullable().or(z.literal("")),
+    email: emailSchema,
+    role: z.string().trim().min(1),
+    phone: phoneSchema.or(z.literal("")).optional().nullable(),
+    department: z.string().trim().max(120).optional().nullable().or(z.literal("")),
+    designation: z.string().trim().max(120).optional().nullable().or(z.literal("")),
+    message: z.string().trim().max(500).optional().nullable().or(z.literal("")),
+    // Per-user permission overrides (module -> action flags). Any shape that
+    // passes through is re-sanitized server-side against the canonical module
+    // and action lists, so a loose schema here is acceptable.
+    permissions: z.record(z.string(), z.record(z.string(), z.boolean())).optional().nullable(),
+    featureAccess: z.record(z.string(), z.boolean()).optional().nullable(),
+    accessIds: z.array(z.string().trim().min(1).max(80)).optional().nullable(),
+  }),
+  acceptInvitation: z.object({
+    token: z.string().trim().min(1),
+    name: z.string().trim().max(120).optional(),
+    password: passwordSchema,
+    phone: phoneSchema,
+  }),
+  updateProfile: z
+    .object({
+      name: z.string().trim().min(1).max(120).optional(),
+      email: emailSchema.optional(),
+      phone: phoneSchema.or(z.literal("")).optional().nullable(),
+      avatarUrl: z.string().trim().optional().or(z.literal("")).nullable(),
+      logoUrl: z.string().trim().optional().or(z.literal("")).nullable(),
+      orgName: z.string().trim().max(120).optional().or(z.literal("")).nullable(),
+      tagline: z.string().trim().max(200).optional().or(z.literal("")).nullable(),
+      description: z.string().trim().max(2000).optional().or(z.literal("")).nullable(),
+      businessEmail: z.string().trim().email("Invalid email").max(160).optional().or(z.literal("")).nullable(),
+      website: z.string().trim().max(200).optional().or(z.literal("")).nullable(),
+      address: z.string().trim().max(500).optional().or(z.literal("")).nullable(),
+      city: z.string().trim().max(100).optional().or(z.literal("")).nullable(),
+      state: z.string().trim().max(100).optional().or(z.literal("")).nullable(),
+      pincode: z.string().trim().max(20).optional().or(z.literal("")).nullable(),
+      gstin: z.string().trim().max(30).optional().or(z.literal("")).nullable(),
+      licenseNo: z.string().trim().max(50).optional().or(z.literal("")).nullable(),
+      businessType: z.string().trim().max(100).optional().or(z.literal("")).nullable(),
+      services: z.string().trim().max(1000).optional().or(z.literal("")).nullable(),
+      businessHours: z.string().trim().max(500).optional().or(z.literal("")).nullable(),
+      metaPixelId: z.string().trim().max(200).optional().or(z.literal("")).nullable(),
+      branches: z.array(z.string().trim().max(200)).max(20).optional(),
+      onboarded: z.boolean().optional(),
     })
     .refine((v) => Object.keys(v).length > 0, "At least one field is required"),
 };
@@ -240,7 +330,10 @@ export const inventorySchemas = {
   }),
   movement: z.object({
     movementType: z.string().trim().min(1),
-    quantityChange: z.coerce.number().int().refine((v) => v !== 0, "Cannot be zero"),
+    quantityChange: z.coerce
+      .number()
+      .int()
+      .refine((v) => v !== 0, "Cannot be zero"),
     batchId: objectId(),
     locationType: z.string().trim().optional(),
     rackCode: z.string().trim().optional(),
@@ -321,5 +414,23 @@ export const auditSchemas = {
     entityType: z.string().trim().optional(),
     entityId: z.string().trim().optional(),
     details: z.record(z.any()).optional(),
+  }),
+};
+
+// Integration config values are plain, non-secret strings (phone numbers,
+// org ids, etc.). Secret/credential fields are rejected at write time by the
+// integration service, never persisted.
+const integrationConfigSchema = z.record(
+  z.string().trim().max(120),
+  z.string().max(2000, "Config values must be 2000 characters or fewer"),
+);
+
+export const integrationSchemas = {
+  connect: z.object({
+    name: z.string().trim().max(120).optional(),
+    config: integrationConfigSchema.optional(),
+  }),
+  configure: z.object({
+    config: integrationConfigSchema.optional(),
   }),
 };

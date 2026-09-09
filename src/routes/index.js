@@ -2,6 +2,7 @@ import { Router } from "express";
 
 import healthRoutes from "./health.routes.js";
 import authRoutes from "./auth.routes.js";
+import onboardingRoutes from "./onboarding.routes.js";
 import userRoutes from "./user.routes.js";
 import roleRoutes from "./role.routes.js";
 import categoryRoutes from "./category.routes.js";
@@ -16,14 +17,18 @@ import auditRoutes from "./audit.routes.js";
 import notificationRoutes from "./notification.routes.js";
 import reportRoutes from "./report.routes.js";
 import dashboardRoutes from "./dashboard.routes.js";
-import onboardingRoutes from "./onboarding.routes.js";
+import integrationRoutes from "./integration.routes.js";
 
 const router = Router();
 
 router.use("/", healthRoutes);
+
 router.use("/auth", authRoutes);
+router.use("/onboarding", onboardingRoutes);
+
 router.use("/users", userRoutes);
 router.use("/roles", roleRoutes);
+
 router.use("/categories", categoryRoutes);
 router.use("/manufacturers", manufacturerRoutes);
 router.use("/suppliers", supplierRoutes);
@@ -32,10 +37,12 @@ router.use("/batches", batchRoutes);
 router.use("/inventory", inventoryRoutes);
 router.use("/purchases", purchaseRoutes);
 router.use("/sales", saleRoutes);
+
 router.use("/audit", auditRoutes);
 router.use("/notifications", notificationRoutes);
+
 router.use("/reports", reportRoutes);
 router.use("/dashboard", dashboardRoutes);
-router.use("/onboarding", onboardingRoutes);
+router.use("/integrations", integrationRoutes);
 
 export default router;

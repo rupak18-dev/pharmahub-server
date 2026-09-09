@@ -33,22 +33,22 @@ The API will be available at `http://localhost:5000/api/v1`.
 
 ## Scripts
 
-| Command          | Description                                  |
-| ---------------- | -------------------------------------------- |
-| `npm run dev`    | Start with nodemon (auto-restart)            |
-| `npm start`      | Start in production mode                     |
-| `npm run seed`   | Seed the database (add `--force` to reset)   |
-| `npm test`       | Run tests (Node test runner)                 |
-| `npm run lint`   | Lint with ESLint                             |
+| Command        | Description                                |
+| -------------- | ------------------------------------------ |
+| `npm run dev`  | Start with nodemon (auto-restart)          |
+| `npm start`    | Start in production mode                   |
+| `npm run seed` | Seed the database (add `--force` to reset) |
+| `npm test`     | Run tests (Node test runner)               |
+| `npm run lint` | Lint with ESLint                           |
 
 ## Demo accounts (created by `npm run seed`, password `password123`)
 
-| Email                        | Role              |
-| ---------------------------- | ----------------- |
-| `owner@pharmahub.demo`       | Owner             |
-| `pharmacist@pharmahub.demo`  | Pharmacist        |
-| `cashier@pharmahub.demo`     | Cashier           |
-| `inventory@pharmahub.demo`   | Inventory Manager |
+| Email                       | Role              |
+| --------------------------- | ----------------- |
+| `owner@pharmahub.demo`      | Owner             |
+| `pharmacist@pharmahub.demo` | Pharmacist        |
+| `cashier@pharmahub.demo`    | Cashier           |
+| `inventory@pharmahub.demo`  | Inventory Manager |
 
 ## Quick smoke test
 

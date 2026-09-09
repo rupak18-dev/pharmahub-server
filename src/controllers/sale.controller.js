@@ -43,12 +43,26 @@ export const create = asyncHandler(async (req, res) => {
     createdBy: req.user?._id,
     createdByName: req.user?.name,
   });
-  recordAudit({ userId: req.user?._id, userName: req.user?.name, action: `Sale ${item.invoiceNo} completed`, entityType: "sale", entityId: item._id, ip: req.ip });
+  recordAudit({
+    userId: req.user?._id,
+    userName: req.user?.name,
+    action: `Sale ${item.invoiceNo} completed`,
+    entityType: "sale",
+    entityId: item._id,
+    ip: req.ip,
+  });
   return created(res, item, "Sale completed");
 });
 
 export const voidSaleById = asyncHandler(async (req, res) => {
   const item = await voidSale(req.params.id, req.body.reason, req.user?._id, req.user?.name);
-  recordAudit({ userId: req.user?._id, userName: req.user?.name, action: `Sale ${item.invoiceNo} voided`, entityType: "sale", entityId: item._id, ip: req.ip });
+  recordAudit({
+    userId: req.user?._id,
+    userName: req.user?.name,
+    action: `Sale ${item.invoiceNo} voided`,
+    entityType: "sale",
+    entityId: item._id,
+    ip: req.ip,
+  });
   return ok(res, item, "Sale voided and stock restored");
 });

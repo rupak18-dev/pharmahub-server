@@ -5,11 +5,19 @@ import { Batch } from "../models/Batch.js";
 import { InventoryItem } from "../models/InventoryItem.js";
 import { Medicine } from "../models/Medicine.js";
 import { Sale } from "../models/Sale.js";
-import { removeStock } from "./inventory.service.js";
+import { addStock, removeStock } from "./inventory.service.js";
 import { generateInvoiceNo } from "../utils/id.js";
 import { round2 } from "../utils/date.js";
 
-export async function createSale({ customerName, customerPhone, items, paymentMode, tender, createdBy, createdByName }) {
+export async function createSale({
+  customerName,
+  customerPhone,
+  items,
+  paymentMode,
+  tender,
+  createdBy,
+  createdByName,
+}) {
   const session = await mongoose.startSession();
   try {
     let sale;
@@ -27,15 +35,22 @@ export async function createSale({ customerName, customerPhone, items, paymentMo
         const med = medMap.get(String(line.medicineId));
         if (!med) throw ApiError.badRequest(`Unknown medicine ${line.medicineId}`);
 
-        const candidates = await Batch.find({ medicineId: med._id, status: { $ne: "expired" } })
-          .sort({ expiryDate: 1 })
+        const candidates = await Batch.find({
+          medicineId: med._id,
+          "status.state": { $nin: ["RECALLED", "RETIRED", "BLOCKED", "QUARANTINED"] },
+          "dates.expiryDate": { $gt: new Date() },
+        })
+          .sort({ "dates.expiryDate": 1 })
           .session(session);
         const locations = await InventoryItem.find({
           batchId: { $in: candidates.map((b) => b._id) },
         }).session(session);
         const qtyByBatch = new Map();
         for (const loc of locations) {
-          qtyByBatch.set(String(loc.batchId), (qtyByBatch.get(String(loc.batchId)) ?? 0) + loc.quantityOnHand);
+          qtyByBatch.set(
+            String(loc.batchId),
+            (qtyByBatch.get(String(loc.batchId)) ?? 0) + loc.quantityOnHand,
+          );
         }
 
         let remaining = line.quantity;
@@ -44,9 +59,10 @@ export async function createSale({ customerName, customerPhone, items, paymentMo
           const available = qtyByBatch.get(String(batch._id)) ?? 0;
           if (available <= 0) continue;
           const take = Math.min(available, remaining);
-          const loc = locations.find(
-            (l) => String(l.batchId) === String(batch._id) && l.quantityOnHand >= take,
-          ) ?? locations.find((l) => String(l.batchId) === String(batch._id));
+          const loc =
+            locations.find(
+              (l) => String(l.batchId) === String(batch._id) && l.quantityOnHand >= take,
+            ) ?? locations.find((l) => String(l.batchId) === String(batch._id));
 
           if (!loc) {
             // Take from the first location with any stock, reducing proportionally.
@@ -65,7 +81,7 @@ export async function createSale({ customerName, customerPhone, items, paymentMo
               userName: createdByName,
               note: "Sales outward",
             });
-            const unit = batch.sellingPrice ?? 0;
+            const unit = batch.pricing.sellingPrice ?? 0;
             const gross = unit * takeFromLoc;
             const discount = (gross * (line.discountPct ?? 0)) / 100;
             const net = gross - discount;
@@ -97,7 +113,7 @@ export async function createSale({ customerName, customerPhone, items, paymentMo
               userName: createdByName,
               note: "Sales outward",
             });
-            const unit = batch.sellingPrice ?? 0;
+            const unit = batch.pricing.sellingPrice ?? 0;
             const gross = unit * take;
             const discount = (gross * (line.discountPct ?? 0)) / 100;
             const net = gross - discount;
@@ -130,23 +146,25 @@ export async function createSale({ customerName, customerPhone, items, paymentMo
       const roundOff = round2(grandTotal - rawGrand);
 
       sale = await Sale.create(
-        [{
-          invoiceNo: generateInvoiceNo(),
-          customerName,
-          customerPhone,
-          items: saleItems,
-          subtotal: round2(subtotal),
-          discountTotal: round2(discountTotal),
-          gstTotal: round2(gstTotal),
-          roundOff,
-          grandTotal,
-          paymentMode,
-          tender,
-          change: tender != null ? round2(Math.max(0, tender - grandTotal)) : 0,
-          status: "completed",
-          createdBy,
-          createdByName,
-        }],
+        [
+          {
+            invoiceNo: generateInvoiceNo(),
+            customerName,
+            customerPhone,
+            items: saleItems,
+            subtotal: round2(subtotal),
+            discountTotal: round2(discountTotal),
+            gstTotal: round2(gstTotal),
+            roundOff,
+            grandTotal,
+            paymentMode,
+            tender,
+            change: tender != null ? round2(Math.max(0, tender - grandTotal)) : 0,
+            status: "completed",
+            createdBy,
+            createdByName,
+          },
+        ],
         { session },
       );
       sale = sale[0];
@@ -164,18 +182,21 @@ export async function voidSale(saleId, reason, userId, userName) {
     await session.withTransaction(async () => {
       const sale = await Sale.findById(saleId).session(session);
       if (!sale) throw ApiError.notFound("Sale not found");
-      if (sale.status !== "completed") throw ApiError.badRequest("Only completed sales can be voided");
+      if (sale.status !== "completed")
+        throw ApiError.badRequest("Only completed sales can be voided");
 
       // Restore stock to the batches.
       for (const item of sale.items) {
         const batch = await Batch.findById(item.batchId).session(session);
         if (!batch) continue;
-        await removeStock({
+        const existingItem = await InventoryItem.findOne({
           batchId: batch._id,
-          locationType: null,
-          rackCode: null,
+        }).session(session);
+        await addStock({
+          batchId: batch._id,
+          locationType: existingItem?.locationType ?? null,
+          rackCode: existingItem?.rackCode ?? null,
           quantity: item.quantity,
-          movementType: "Sales Outward",
           referenceDocId: sale._id,
           userId,
           userName,
