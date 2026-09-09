@@ -1,4 +1,4 @@
-import { Role } from "../models/Role.js";
+import { Role, DEFAULT_ROLE_PERMISSIONS } from "../models/Role.js";
 import { constants } from "../config/constants.js";
 
 // Effective-permission model:
@@ -64,7 +64,14 @@ export function mergePermissionOverrides(rolePerms, overrides) {
 export async function getRolePermissions(roleName) {
   if (!roleName) return {};
   const role = await Role.findOne({ name: roleName }).lean();
-  return normalizePermissions(role?.permissions);
+  const stored = normalizePermissions(role?.permissions);
+  // A missing/empty Role record must never lock an entire role out of every
+  // module — fall back to the built-in default matrix for that role so
+  // authorization keeps working on fresh/misprovisioned databases.
+  if (!role || Object.keys(stored).length === 0) {
+    return DEFAULT_ROLE_PERMISSIONS[roleName] ?? {};
+  }
+  return stored;
 }
 
 // Capability toggles (featureAccess) are applied LAST so they always win over
