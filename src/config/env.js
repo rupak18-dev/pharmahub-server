@@ -149,6 +149,17 @@ export const env = {
     envVar("CORS_ORIGIN", "cors_origin") ??
     "*",
 
+  // Demo account passwords (development/demo flows only). Never hardcoded —
+  // they must be provided via environment configuration (.env).
+  demoAccountPassword: process.env.DEMO_ACCOUNT_PASSWORD ?? "",
+
+  devDemoPassword: process.env.DEV_DEMO_PASSWORD ?? "",
+
+  // Explicit opt-in for demo-account auto-creation flows (@pharmahub.demo
+  // logins, magic-link demo signup, seeded dev user). Off unless explicitly
+  // enabled in the environment; production always ignores them.
+  enableDemoAccounts: process.env.ENABLE_DEMO_ACCOUNTS === "true",
+
   cookie: {
     name: "pharmahub_session",
 

@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import { env } from "../config/env.js";
 import { constants } from "../config/constants.js";
 import { ApiError } from "../core/ApiError.js";
+import { logger } from "../core/logger.js";
 import { User } from "../models/User.js";
 import { computeProfileCompletion } from "./profileCompletion.service.js";
 import { getEffectivePermissions, normalizePermissions } from "./permissions.service.js";
@@ -18,11 +19,13 @@ export async function registerUser({ name, email, password, orgName }) {
   if (existing) throw ApiError.conflict("A user with this email already exists");
 
   const passwordHash = await bcrypt.hash(password, 10);
+  // No role is assigned here on purpose: self-registered accounts stay
+  // role-less until the Owner explicitly assigns one (Users & Roles) —
+  // never a silent default.
   const user = await User.create({
     name,
     email: normalizedEmail,
     passwordHash,
-    role: "Pharmacist",
     orgName,
   });
 
@@ -54,11 +57,15 @@ export async function loginUser({ email, password }) {
     .collation({ locale: "en", strength: 2 })
     .select("+passwordHash");
 
+  // Demo auto-login accounts exist ONLY when explicitly enabled via
+  // ENABLE_DEMO_ACCOUNTS=true outside production — never part of the normal flow.
   if (
     !user &&
+    env.enableDemoAccounts &&
+    !env.isProduction &&
     (normalizedEmail.endsWith("@pharmahub.demo") || normalizedEmail === "demo@pharmahub.com")
   ) {
-    const passwordHash = await bcrypt.hash("password123", 10);
+    const passwordHash = await bcrypt.hash(env.demoAccountPassword, 10);
     const role = normalizedEmail.includes("owner")
       ? "Owner"
       : normalizedEmail.includes("admin")
@@ -76,17 +83,33 @@ export async function loginUser({ email, password }) {
   }
 
   if (!user || !user.active || user.status === "removed") {
+    logger.info(`[auth.login] no active account for email=${normalizedEmail}`);
+    throw ApiError.unauthorized("Invalid email or password");
+  }
+
+  // Accounts provisioned without a local password (e.g. Google sign-up) must
+  // fail as unauthorized instead of crashing inside bcrypt.compare.
+  if (!user.passwordHash) {
     throw ApiError.unauthorized("Invalid email or password");
   }
 
   const match = await bcrypt.compare(password, user.passwordHash);
-  if (!match) throw ApiError.unauthorized("Invalid email or password");
+  if (!match) {
+    logger.info(`[auth.login] bad password for email=${normalizedEmail}`);
+    throw ApiError.unauthorized("Invalid email or password");
+  }
 
+  // The session credential is bound to THIS database user's id — never to a
+  // role, a demo account, or any previously authenticated identity.
   const token = signToken(user._id);
+  logger.info(
+    `[auth.login] requested email=${normalizedEmail} -> matched user id=${user._id} role=${user.role} (session userId=${user._id})`,
+  );
   const publicUser = await toAuthUser(user.toObject());
   publicUser.profileCompletion = computeProfileCompletion(user);
   return { token, user: publicUser };
 }
+
 
 export async function changePassword(userId, { currentPassword, newPassword }) {
   const user = await User.findById(userId).select("+passwordHash");
@@ -174,6 +197,7 @@ export function toPublicUser(user) {
     phoneVerified: user.phoneVerified ?? false,
     phoneVerifiedAt: user.phoneVerifiedAt ?? null,
     avatarUrl: user.avatarUrl ?? null,
+    logoUrl: user.logoUrl ?? null,
     tagline: user.tagline ?? null,
     description: user.description ?? null,
     businessEmail: user.businessEmail ?? null,
@@ -194,6 +218,8 @@ export function toPublicUser(user) {
     accessIds: user.accessIds ?? [],
     department: user.department ?? null,
     designation: user.designation ?? null,
+    invitedBy: user.invitedBy ? String(user.invitedBy) : null,
+    createdBy: user.createdBy ? String(user.createdBy) : null,
     profileCompletion: user.profileCompletion ?? null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
