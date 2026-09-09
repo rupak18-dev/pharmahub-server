@@ -27,6 +27,31 @@ export const auth = asyncHandler(async (req, _res, next) => {
   next();
 });
 
+export const optionalAuth = asyncHandler(async (req, _res, next) => {
+  const token = req.cookies?.[env.cookie.name] ?? bearerToken(req);
+  if (!token) {
+    req.user = null;
+    return next();
+  }
+
+  let payload;
+  try {
+    payload = jwt.verify(token, env.jwtSecret, { algorithms: ["HS256"] });
+  } catch {
+    req.user = null;
+    return next();
+  }
+
+  const user = await User.findById(payload.sub).lean();
+  if (user && user.active && user.status !== "removed") {
+    req.user = user;
+  } else {
+    req.user = null;
+  }
+
+  next();
+});
+
 function bearerToken(req) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith("Bearer ")) return null;
