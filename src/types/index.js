@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { normalizeIndianPhone } from "../utils/phone.js";
+import { normalizePhone, isValidPhone } from "../utils/phone.js";
 
 /**
  * @typedef {import("mongoose").Document} MongooseDocument
@@ -95,18 +95,18 @@ const idsSchema = () =>
 const emailSchema = z.string().trim().email("Invalid email").max(160);
 const passwordSchema = z.string().min(6, "Password must be at least 6 characters").max(128);
 
-// Optional Indian mobile number: accepts "+91 98765 43210", "98765 43210" or
-// "+919876543210" and normalizes to "+919876543210". Empty/absent is allowed.
+// Optional phone number: accepts Indian mobile numbers (+91 or raw 10 digits)
+// or international E.164 formats (+1, +44, +971, etc.). Normalizes to E.164 standard.
 const phoneSchema = z
   .string()
   .trim()
-  .max(20, "Phone number is too long")
+  .max(25, "Phone number is too long")
   .optional()
   .refine(
-    (v) => !v || /^(?:\+91)?[6-9]\d{9}$/.test(v.replace(/[\s\-().]/g, "")),
-    "Enter a valid Indian mobile number (10 digits starting with 6–9, e.g. +91 98765 43210)",
+    (v) => !v || isValidPhone(v),
+    "Enter a valid phone number (e.g. +91 98765 43210 or +1 555 019 2834)",
   )
-  .transform((v) => (v ? normalizeIndianPhone(v) : v));
+  .transform((v) => (v ? normalizePhone(v) : v));
 
 // Lenient phone schema for PATCH updates: accepts any non-empty string up to
 // 20 chars without enforcing Indian format. This prevents stored phones in
