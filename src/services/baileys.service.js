@@ -12,7 +12,7 @@ import { Boom } from "@hapi/boom";
 
 import { logger } from "../core/logger.js";
 import { Integration } from "../models/Integration.js";
-import { isValidPhone, normalizePhone } from "../utils/phone.js";
+import { normalizePhone } from "../utils/phone.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
