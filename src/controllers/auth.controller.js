@@ -25,6 +25,7 @@ import { User } from "../models/User.js";
 
 export const register = asyncHandler(async (req, res) => {
   const result = await registerUser(req.body);
+  setSessionCookie(res, result.token, { remember: true });
   recordAudit({
     userId: result.user?.id,
     userName: result.user?.name,
@@ -33,7 +34,7 @@ export const register = asyncHandler(async (req, res) => {
     entityId: result.user?.id,
     ip: req.ip,
   });
-  return created(res, result.user, "Registration successful. Please sign in.");
+  return created(res, { token: result.token, user: result.user }, "Registration successful");
 });
 
 export const login = asyncHandler(async (req, res) => {

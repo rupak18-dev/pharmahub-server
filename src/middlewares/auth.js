@@ -27,8 +27,28 @@ export const auth = asyncHandler(async (req, _res, next) => {
   next();
 });
 
+export const authOptional = asyncHandler(async (req, _res, next) => {
+  const token = req.cookies?.[env.cookie.name] ?? bearerToken(req);
+  if (!token) {
+    return next();
+  }
+
+  try {
+    const payload = jwt.verify(token, env.jwtSecret, { algorithms: ["HS256"] });
+    const user = await User.findById(payload.sub).lean();
+    if (user && user.active && user.status !== "removed") {
+      req.user = user;
+    }
+  } catch {
+    // Optional auth silently ignores expired or invalid tokens
+  }
+
+  next();
+});
+
 function bearerToken(req) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith("Bearer ")) return null;
   return header.slice(7).trim();
 }
+

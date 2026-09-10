@@ -82,12 +82,23 @@ export function isSessionConnected(tenantId) {
 /**
  * Initializes or reconnects a Baileys WhatsApp Web socket for the given tenant.
  */
-export async function initWhatsAppSession(tenantId, { forceNew = false } = {}) {
+export async function initWhatsAppSession(tenantId, { forceNew = false, reconnectAttempts = 0 } = {}) {
   const key = String(tenantId);
   let mem = activeSessions.get(key);
 
   if (mem?.sock && mem.status === "connected" && !forceNew) {
     return getSessionStatus(key);
+  }
+
+  // Clean up any existing socket instance to avoid duplicate listeners or dangling connections
+  if (mem?.sock) {
+    try {
+      mem.sock.ev.removeAllListeners("connection.update");
+      mem.sock.ev.removeAllListeners("creds.update");
+      mem.sock.end?.();
+    } catch {
+      // Ignore cleanup error
+    }
   }
 
   const sessionPath = getSessionPath(key);
@@ -130,7 +141,7 @@ export async function initWhatsAppSession(tenantId, { forceNew = false } = {}) {
     status: "connecting",
     phone: null,
     connectedAt: null,
-    reconnectAttempts: 0,
+    reconnectAttempts,
   };
   activeSessions.set(key, mem);
 
@@ -190,7 +201,12 @@ export async function initWhatsAppSession(tenantId, { forceNew = false } = {}) {
         ? lastDisconnect?.error?.output?.statusCode
         : lastDisconnect?.error?.status;
 
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+      const isQrTimeout = statusCode === 408 || statusCode === DisconnectReason.timedOut;
+      const wasConnected = mem.status === "connected" || Boolean(mem.phone);
+
+      // Only auto-reconnect if session was legitimately connected or not a QR timeout
+      const shouldReconnect = !isLoggedOut && (!isQrTimeout || wasConnected);
       logger.warn(
         `[Baileys] Connection closed for tenant ${key} (code: ${statusCode}, shouldReconnect: ${shouldReconnect})`,
       );
@@ -199,33 +215,40 @@ export async function initWhatsAppSession(tenantId, { forceNew = false } = {}) {
       mem.qrCode = null;
 
       if (!shouldReconnect) {
-        // Logged out: remove session files and update db
-        logger.info(`[Baileys] Logged out from WhatsApp on tenant ${key}`);
-        if (fs.existsSync(sessionPath)) {
-          fs.rmSync(sessionPath, { recursive: true, force: true });
-        }
-        activeSessions.delete(key);
-        await Integration.updateOne(
-          { tenantId: key, key: "whatsapp" },
-          {
-            $set: {
-              connected: false,
-              disconnectedAt: new Date(),
-              lastError: "Session logged out by device",
+        if (isLoggedOut) {
+          // Logged out: remove session files and update db
+          logger.info(`[Baileys] Logged out from WhatsApp on tenant ${key}`);
+          if (fs.existsSync(sessionPath)) {
+            fs.rmSync(sessionPath, { recursive: true, force: true });
+          }
+          activeSessions.delete(key);
+          await Integration.updateOne(
+            { tenantId: key, key: "whatsapp" },
+            {
+              $set: {
+                connected: false,
+                disconnectedAt: new Date(),
+                lastError: "Session logged out by device",
+              },
             },
-          },
-        ).catch(() => {});
+          ).catch(() => {});
+        } else if (isQrTimeout && !wasConnected) {
+          logger.info(`[Baileys] QR code expired for tenant ${key} — stopping reconnect loop`);
+        }
       } else {
         // Attempt reconnection with exponential backoff (up to 5 attempts)
-        if (mem.reconnectAttempts < 5) {
-          mem.reconnectAttempts += 1;
-          const delay = Math.min(mem.reconnectAttempts * 3000, 15000);
-          logger.info(`[Baileys] Scheduling reconnect #${mem.reconnectAttempts} in ${delay}ms for tenant ${key}`);
+        const nextAttempt = (mem.reconnectAttempts || 0) + 1;
+        mem.reconnectAttempts = nextAttempt;
+        if (nextAttempt <= 5) {
+          const delay = Math.min(nextAttempt * 3000, 15000);
+          logger.info(`[Baileys] Scheduling reconnect #${nextAttempt} in ${delay}ms for tenant ${key}`);
           setTimeout(() => {
-            initWhatsAppSession(key).catch((err) => {
+            initWhatsAppSession(key, { reconnectAttempts: nextAttempt }).catch((err) => {
               logger.error(`[Baileys] Reconnect failed for tenant ${key}: ${err.message}`);
             });
           }, delay);
+        } else {
+          logger.warn(`[Baileys] Max reconnect attempts (5) reached for tenant ${key}. Stopped.`);
         }
       }
     }
