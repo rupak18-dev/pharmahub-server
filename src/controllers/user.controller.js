@@ -33,6 +33,8 @@ const PROFILE_EDITABLE_FIELDS = [
   "name",
   "email",
   "phone",
+  "avatarUrl",
+  "logoUrl",
   "orgName",
   "role",
   "tagline",
@@ -122,15 +124,22 @@ function assertSameOrganization(invitation, caller) {
   throw ApiError.forbidden("You can only manage invitations from your own organization");
 }
 
-// Cross-organization isolation: users are scoped to their denormalized orgName.
-// Callers without an org (rare dev/legacy records) may manage org-less users.
+// Cross-organization & team isolation: users are scoped to their inviter/creator or orgName.
 function assertSameOrgOrAllow(target, caller) {
-  if (caller?.role === "Owner") return;
-  if (!target.orgName) return;
-  if (!caller?.orgName) return;
-  if (target.orgName.toLowerCase() !== caller.orgName.toLowerCase()) {
-    throw ApiError.forbidden("You can only manage users from your own organization");
+  if (String(target._id) === String(caller?._id)) return;
+  if (target.invitedBy && String(target.invitedBy) === String(caller?._id)) return;
+  if (target.createdBy && String(target.createdBy) === String(caller?._id)) return;
+  if (caller?.invitedBy && String(caller.invitedBy) === String(target._id)) return;
+  if (caller?.createdBy && String(caller.createdBy) === String(target._id)) return;
+  if (
+    caller?.orgName &&
+    target.orgName &&
+    caller.orgName.toLowerCase() === target.orgName.toLowerCase()
+  ) {
+    return;
   }
+  if (caller?.role === "Owner" && (!target.orgName || !caller?.orgName)) return;
+  throw ApiError.forbidden("You can only manage users from your own organization");
 }
 
 export const listUsers = asyncHandler(async (req, res) => {
@@ -143,21 +152,73 @@ export const listUsers = asyncHandler(async (req, res) => {
   if (req.query.active !== undefined) filter.active = req.query.active === "true";
   if (req.query.role) filter.role = req.query.role;
   if (req.query.status) filter.status = req.query.status;
-  if (req.user.orgName && req.user.role !== "Owner") {
-    filter.orgName = new RegExp(
-      `^${req.user.orgName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
-      "i",
-    );
+
+  const callerId = req.user._id;
+  const inviterId = req.user.invitedBy || req.user.createdBy;
+  const orgName = req.user.orgName?.trim();
+
+  // Tenant/team scoping:
+  // Admin/Owner sees themselves and users they invited/created.
+  // Staff member sees themselves, the admin who invited them, and fellow teammates invited by that admin.
+  const scopeConditions = [
+    { _id: callerId },
+    { invitedBy: callerId },
+    { createdBy: callerId },
+  ];
+
+  if (inviterId) {
+    scopeConditions.push({ _id: inviterId });
+    scopeConditions.push({ invitedBy: inviterId });
+    scopeConditions.push({ createdBy: inviterId });
   }
+
+  if (orgName && orgName.toLowerCase() !== "pharmahub") {
+    scopeConditions.push({
+      orgName: new RegExp(`^${orgName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
+    });
+  }
+
+  // Seed demo emails to exclude from live users list unless the caller is that demo account
+  const demoEmails = [
+    "demo@pharmahub.local",
+    "owner@pharmahub.demo",
+    "pharmacist@pharmahub.demo",
+    "cashier@pharmahub.demo",
+    "inventory@pharmahub.demo",
+  ];
+  const callerEmail = (req.user.email || "").toLowerCase();
+  const isCallerDemo = demoEmails.includes(callerEmail);
+
+  const andConditions = [{ $or: scopeConditions }];
+
+  if (!isCallerDemo) {
+    andConditions.push({ email: { $nin: demoEmails } });
+  }
+
   // Removed users are hidden from the default list; use ?includeRemoved=true
   // to audit removals explicitly.
   if (!req.query.includeRemoved && !filter.status) {
-    filter.status = { $ne: "removed" };
+    andConditions.push({ status: { $ne: "removed" } });
   }
   if (req.query.search) {
     const re = new RegExp(req.query.search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-    filter.$or = [{ name: re }, { email: re }];
+    andConditions.push({ $or: [{ name: re }, { email: re }] });
   }
+
+  if (filter.active !== undefined) {
+    andConditions.push({ active: filter.active });
+    delete filter.active;
+  }
+  if (filter.role) {
+    andConditions.push({ role: filter.role });
+    delete filter.role;
+  }
+  if (filter.status) {
+    andConditions.push({ status: filter.status });
+    delete filter.status;
+  }
+
+  filter.$and = andConditions;
 
   const [users, total] = await Promise.all([
     User.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
@@ -220,11 +281,12 @@ export const updateMyProfile = asyncHandler(async (req, res) => {
     ip: req.ip,
   });
 
-  return ok(
-    res,
-    { user: toPublicUser(user.toObject()), profileCompletion: completion },
-    "Profile updated",
-  );
+  // The response IS the refreshed identity — return the same enriched shape
+  // as GET /auth/me (role + effective permissions) so clients that replace
+  // their session user with this payload can never end up with empty
+  // role-default permissions after a save.
+  const publicUser = await toAuthUser(user.toObject());
+  return ok(res, { user: publicUser, profileCompletion: completion }, "Profile updated");
 });
 
 // PUT /users/me/avatar — multipart profile-image upload. The authenticated
@@ -300,6 +362,9 @@ export const createUser = asyncHandler(async (req, res) => {
     roleId,
     email: req.body.email.toLowerCase(),
     passwordHash,
+    createdBy: req.user?._id || null,
+    invitedBy: req.user?._id || null,
+    orgName: req.body.orgName || req.user?.orgName || "",
   });
   recordAudit({
     userId: req.user?._id,
@@ -313,8 +378,95 @@ export const createUser = asyncHandler(async (req, res) => {
 });
 
 export const updateUser = asyncHandler(async (req, res) => {
-  const target = await User.findById(req.params.id);
-  if (!target) throw ApiError.notFound("User not found");
+  let target = await User.findById(req.params.id);
+  if (!target) {
+    const invitation = await Invitation.findById(req.params.id);
+    if (!invitation) throw ApiError.notFound("Staff member not found");
+    if (invitation.status !== "pending") {
+      throw ApiError.badRequest("Only pending invitations can be updated");
+    }
+    assertSameOrganization(invitation, req.user);
+
+    const {
+      name,
+      role,
+      phone,
+      department,
+      designation,
+      permissions,
+      featureAccess,
+      accessIds,
+    } = req.body;
+
+    if (role !== undefined) {
+      await assertRoleExists(role);
+      invitation.role = role;
+      invitation.roleId = (await resolveRoleId(role)) ?? null;
+    }
+    if (name !== undefined) invitation.name = name;
+    if (phone !== undefined) invitation.phone = phone;
+    if (department !== undefined) invitation.department = department;
+    if (designation !== undefined) invitation.designation = designation;
+    if (permissions !== undefined) invitation.permissions = sanitizePermissionOverrides(permissions);
+    if (featureAccess !== undefined) invitation.featureAccess = featureAccess;
+    if (accessIds !== undefined) invitation.accessIds = sanitizeAccessModules(accessIds);
+
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    invitation.tokenHash = hashToken(rawToken);
+    invitation.expiresAt = new Date(Date.now() + constants.security.invitationTtlMs);
+    await invitation.save();
+
+    recordAudit({
+      userId: req.user._id,
+      userName: req.user.name,
+      action: "Invitation updated",
+      entityType: "invitation",
+      entityId: String(invitation._id),
+      ip: req.ip,
+    });
+
+    const link = `${env.frontendUrl}/accept-invitation?token=${rawToken}`;
+    const { subject, html, text } = buildInvitationEmail({
+      name: invitation.name,
+      orgName: invitation.orgName,
+      role: invitation.role,
+      link,
+      expiresInHours: constants.security.invitationTtlHours,
+      message: "Your role and access details have been updated by an administrator.",
+      email: invitation.email,
+    });
+
+    let emailSent = false;
+    let emailSkipped = false;
+    let emailError = null;
+    try {
+      const sendResult = await sendEmail({ to: invitation.email, subject, html, text });
+      emailSent = !sendResult?.skipped;
+      emailSkipped = Boolean(sendResult?.skipped);
+    } catch (err) {
+      emailError = err.message || "Failed to send update email";
+      logger.error("[users.update] invitation email failed", err);
+    }
+
+    return ok(
+      res,
+      {
+        invitation: {
+          id: invitation._id,
+          email: invitation.email,
+          role: invitation.role,
+          status: invitation.status,
+          name: invitation.name,
+          department: invitation.department,
+          designation: invitation.designation,
+        },
+        emailSent,
+        emailSkipped,
+        ...(emailError && { emailError }),
+      },
+      "Staff invitation updated",
+    );
+  }
   assertSameOrgOrAllow(target, req.user);
 
   // Only allow safe fields to be updated via PATCH
@@ -463,7 +615,16 @@ export const updateUser = asyncHandler(async (req, res) => {
     featureChanged ||
     departmentChanged ||
     designationChanged;
-  const shouldNotify = roleChanged || accessChanged;
+  const shouldNotify = Boolean(
+    roleChanged ||
+    accessChanged ||
+    role !== undefined ||
+    accessIds !== undefined ||
+    featureAccess !== undefined ||
+    permissions !== undefined ||
+    department !== undefined ||
+    designation !== undefined,
+  );
 
   if (status !== undefined && status !== (target.status ?? "active")) {
     const action =
@@ -499,78 +660,78 @@ export const updateUser = asyncHandler(async (req, res) => {
   // requirement. A delivery failure NEVER rolls back the change — it is logged
   // and surfaced via the audit trail instead. When role and access change in
   // the same save, exactly ONE consolidated email is sent.
-// After sending email, capture result. emailSent is null when no notification
-// was required (nothing relevant changed) so callers never misread "no email
-// needed" as "email delivered".
-let emailSent = null;
-let emailError = null;
-if (shouldNotify) {
-  const kind = roleChanged && accessChanged ? "both" : roleChanged ? "role" : "access";
-  const [effectivePermissions, previousPermissions] = await Promise.all([
-    getEffectivePermissions(user.toObject()),
-    getEffectivePermissions(target.toObject()),
-  ]);
-  const { subject, html, text } = buildRoleChangeEmail({
-    name: user.name,
-    orgName: user.orgName,
-    ...(roleChanged ? { previousRole: target.role } : {}),
-    newRole: user.role,
-    permissions: effectivePermissions,
-    previousPermissions,
-    features: user.featureAccess,
-    previousFeatures: target.featureAccess,
-    changedBy: req.user?.name,
-    link: `${env.frontendUrl}/login`,
-  });
-  try {
-    logger.info(`[MAIL DEBUG] flow=ACCESS_UPDATE recipient=${user.email} mailServiceCalled=true`);
-    const sendResult = await sendEmail({ to: user.email, subject, html, text });
-    logger.info(
-      `[MAIL DEBUG] flow=ACCESS_UPDATE sendResult=${sendResult?.skipped ? "skipped" : "success"} recipient=${user.email} kind=${kind}`,
-    );
-    logger.info(
-      `[users.update] role/access-change email — recipient=${user.email} skipped=${Boolean(sendResult?.skipped)} kind=${kind}`,
-    );
-    recordAudit({
-      userId: req.user?._id,
-      userName: req.user?.name,
-      action: sendResult?.skipped
-        ? "Role change email skipped (SMTP not configured)"
-        : "Role change email sent",
-      entityType: "user",
-      entityId: user._id,
-      details: { kind, subject },
-      ip: req.ip,
+  let emailSent = null;
+  let emailSkipped = false;
+  let emailError = null;
+  if (shouldNotify) {
+    const kind = roleChanged && accessChanged ? "both" : roleChanged ? "role" : "access";
+    const [effectivePermissions, previousPermissions] = await Promise.all([
+      getEffectivePermissions(user.toObject()),
+      getEffectivePermissions(target.toObject()),
+    ]);
+    const { subject, html, text } = buildRoleChangeEmail({
+      name: user.name,
+      orgName: user.orgName,
+      ...(roleChanged ? { previousRole: target.role } : {}),
+      newRole: user.role,
+      permissions: effectivePermissions,
+      previousPermissions,
+      features: user.featureAccess,
+      previousFeatures: target.featureAccess,
+      changedBy: req.user?.name,
+      link: `${env.frontendUrl}/login`,
     });
-    emailSent = !sendResult?.skipped;
-  } catch (err) {
-    logger.error(
-      `[users.update] role-change email failed for ${user.email} — role change kept`,
-      err,
-    );
-    recordAudit({
-      userId: req.user?._id,
-      userName: req.user?.name,
-      action: "Role change email failed",
-      entityType: "user",
-      entityId: user._id,
-      details: { kind, subject },
-      ip: req.ip,
-    });
-    emailSent = false;
-    emailError = err.message || "Email send failed";
+    try {
+      logger.info(`[MAIL DEBUG] flow=ACCESS_UPDATE recipient=${user.email} mailServiceCalled=true`);
+      const sendResult = await sendEmail({ to: user.email, subject, html, text });
+      logger.info(
+        `[MAIL DEBUG] flow=ACCESS_UPDATE sendResult=${sendResult?.skipped ? "skipped" : "success"} recipient=${user.email} kind=${kind}`,
+      );
+      logger.info(
+        `[users.update] role/access-change email — recipient=${user.email} skipped=${Boolean(sendResult?.skipped)} kind=${kind}`,
+      );
+      recordAudit({
+        userId: req.user?._id,
+        userName: req.user?.name,
+        action: sendResult?.skipped
+          ? "Role change email skipped (SMTP not configured)"
+          : "Role change email sent",
+        entityType: "user",
+        entityId: user._id,
+        details: { kind, subject },
+        ip: req.ip,
+      });
+      emailSent = !sendResult?.skipped;
+      emailSkipped = Boolean(sendResult?.skipped);
+    } catch (err) {
+      logger.error(
+        `[users.update] role-change email failed for ${user.email} — role change kept`,
+        err,
+      );
+      recordAudit({
+        userId: req.user?._id,
+        userName: req.user?.name,
+        action: "Role change email failed",
+        entityType: "user",
+        entityId: user._id,
+        details: { kind, subject },
+        ip: req.ip,
+      });
+      emailSent = false;
+      emailError = err.message || "Email send failed";
+    }
   }
-}
-// Return response with email status
-return ok(
-  res,
-  {
-    user: toPublicUser(user.toObject()),
-    emailSent,
-    ...(emailError && { emailError }),
-  },
-  "User updated",
-);
+  // Return response with email status
+  return ok(
+    res,
+    {
+      user: toPublicUser(user.toObject()),
+      emailSent,
+      emailSkipped,
+      ...(emailError && { emailError }),
+    },
+    "User updated",
+  );
 });
 
 // Notify the removed staff member AFTER the removal has succeeded. A delivery
@@ -724,7 +885,18 @@ export const deleteUser = asyncHandler(async (req, res) => {
 });
 
 export const inviteUser = asyncHandler(async (req, res) => {
-  const { name, email, role, message, phone, department, permissions, featureAccess, accessIds } = req.body;
+  const {
+    name,
+    email,
+    role,
+    message,
+    phone,
+    department,
+    designation,
+    permissions,
+    featureAccess,
+    accessIds,
+  } = req.body;
   logger.info(
     `[users.invite] POST /users/invite — by=${req.user.email} org=${req.user.orgName ?? "(none)"} target=${email ?? "(missing)"} role=${role ?? "(missing)"}`,
   );
@@ -762,6 +934,7 @@ export const inviteUser = asyncHandler(async (req, res) => {
     message,
     phone,
     department: department?.trim() || null,
+    designation: designation?.trim() || null,
     invitedBy: req.user._id,
     orgName: req.user.orgName ?? "",
     tokenHash,
@@ -949,8 +1122,13 @@ export const acceptInvitation = asyncHandler(async (req, res) => {
     existing.accessIds = invitation.accessIds ?? [];
     existing.orgName = invitation.orgName ?? existing.orgName ?? "";
     if (phone?.trim()) existing.phone = phone.trim();
-    // Department captured on the New Staff form travels with the invitation.
+    // Department & designation captured on the New Staff form travel with the invitation.
     if (invitation.department) existing.department = invitation.department;
+    if (invitation.designation) existing.designation = invitation.designation;
+    if (invitation.invitedBy) {
+      existing.invitedBy = invitation.invitedBy;
+      if (!existing.createdBy) existing.createdBy = invitation.invitedBy;
+    }
     existing.permissions = permissionOverrides;
     existing.featureAccess = featureAccess;
     existing.status = "active";
@@ -968,6 +1146,9 @@ export const acceptInvitation = asyncHandler(async (req, res) => {
       orgName: invitation.orgName ?? "",
       phone: phone?.trim() || invitation.phone || undefined,
       department: invitation.department ?? null,
+      designation: invitation.designation ?? null,
+      invitedBy: invitation.invitedBy || null,
+      createdBy: invitation.invitedBy || null,
       permissions: permissionOverrides,
       featureAccess,
       status: "active",
@@ -1134,7 +1315,25 @@ export const cancelInvitation = asyncHandler(async (req, res) => {
     ip: req.ip,
   });
 
-  return ok(res, null, "Invitation cancelled");
+  const removalEmail = await notifyStaffRemoval({
+    to: invitation.email,
+    name: invitation.name ?? invitation.email,
+    orgName: invitation.orgName,
+    entityType: "invitation",
+    entityId: invitation._id,
+    actor: req.user,
+    ip: req.ip,
+  });
+
+  return ok(
+    res,
+    { ...removalEmail },
+    removalEmail.emailSkipped
+      ? "Invitation cancelled. Email notification skipped — SMTP is not configured."
+      : removalEmail.emailSent
+        ? "Invitation cancelled and notification email sent."
+        : "Invitation cancelled. Email notification could not be sent.",
+  );
 });
 
 // GET /users/invite/:id/link — returns a fresh shareable invitation link for a
@@ -1163,26 +1362,25 @@ export const getInvitationLink = asyncHandler(async (req, res) => {
 // GET /users/invitations — invitation history scoped to the caller's organization,
 // used by the Users & Roles screen to surface Pending/Accepted/Expired/Cancelled.
 export const listInvitations = asyncHandler(async (req, res) => {
-  const orgNameRegex = req.user.orgName
-    ? new RegExp(`^${req.user.orgName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i")
-    : null;
+  const callerId = req.user._id;
+  const inviterId = req.user.invitedBy || req.user.createdBy;
+  const orgName = req.user.orgName?.trim();
+
+  const scopeConditions = [{ invitedBy: callerId }];
+
+  if (inviterId) {
+    scopeConditions.push({ invitedBy: inviterId });
+  }
+
+  if (orgName && orgName.toLowerCase() !== "pharmahub") {
+    scopeConditions.push({
+      orgName: new RegExp(`^${orgName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
+    });
+  }
 
   const filter = {
     status: { $nin: ["accepted", "used"] },
-    ...(req.user.role === "Owner"
-      ? orgNameRegex
-        ? {
-            $or: [
-              { orgName: orgNameRegex },
-              { orgName: { $in: ["", null] } },
-              { orgName: { $exists: false } },
-              { invitedBy: req.user._id },
-            ],
-          }
-        : {}
-      : orgNameRegex
-        ? { $or: [{ orgName: orgNameRegex }, { invitedBy: req.user._id }] }
-        : { invitedBy: req.user._id }),
+    $or: scopeConditions,
   };
 
   const invitations = await Invitation.find(filter).sort({ createdAt: -1 }).lean();
@@ -1209,6 +1407,7 @@ export const listInvitations = asyncHandler(async (req, res) => {
         orgName: inv.orgName ?? "",
         phone: inv.phone ?? null,
         department: inv.department ?? null,
+        designation: inv.designation ?? null,
         accessIds: inv.accessIds ?? [],
         status,
         expiresAt: inv.expiresAt,
