@@ -34,7 +34,7 @@ export const register = asyncHandler(async (req, res) => {
     entityId: result.user?.id,
     ip: req.ip,
   });
-  return created(res, { token: result.token, user: result.user }, "Registration successful");
+  return created(res, result.user, "Registration successful. Please sign in.");
 });
 
 export const login = asyncHandler(async (req, res) => {
@@ -48,8 +48,10 @@ export const login = asyncHandler(async (req, res) => {
     entityId: result.user.id,
     ip: req.ip,
   });
-  return ok(res, { token: result.token, user: result.user }, "Login successful");
+  // Session JWT travels as an httpOnly cookie — never in the response body.
+  return ok(res, { user: result.user }, "Login successful");
 });
+
 
 // GET /auth/me — returns the current user with full effective permissions and
 // profile completion score. Delegates to the same enrichment logic used by
