@@ -27,6 +27,7 @@ import { User } from "../models/User.js";
 
 export const register = asyncHandler(async (req, res) => {
   const result = await registerUser(req.body);
+  setSessionCookie(res, result.token, { remember: true });
   recordAudit({
     userId: result.user?.id,
     userName: result.user?.name,
@@ -75,6 +76,7 @@ export const login = asyncHandler(async (req, res) => {
   // Session JWT travels as an httpOnly cookie — never in the response body.
   return ok(res, { user: result.user }, "Login successful");
 });
+
 
 // GET /auth/me — returns the current user with full effective permissions and
 // profile completion score. Delegates to the same enrichment logic used by

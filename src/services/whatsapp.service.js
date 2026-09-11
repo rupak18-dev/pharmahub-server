@@ -6,9 +6,10 @@ import { whatsAppConfig, isWhatsAppConfigured } from "../config/env.js";
 import { Integration } from "../models/Integration.js";
 import { ReportBill } from "../models/ReportBill.js";
 import { resolveTenant } from "./integration.service.js";
-import { isValidIndianPhone, normalizeIndianPhone } from "../utils/phone.js";
+import { isValidPhone, normalizePhone } from "../utils/phone.js";
 import { storedFilePath } from "../middlewares/upload.js";
 import { generateInvoiceDocument } from "./invoicePdf.service.js";
+import { isSessionConnected, sendBaileysMessage } from "./baileys.service.js";
 
 // WhatsApp Business bill delivery. The bill is ALWAYS persisted first (by the
 // caller); this service only attempts the best-effort delivery and records the
@@ -33,8 +34,8 @@ export const isSalesBill = (bill) => bill?.documentType === "sales_invoice";
 function resolveDeliveryPhone(bill) {
   const raw = String(bill?.customer?.phone ?? "").trim();
   if (!raw) return { ok: false, reason: "no_number" };
-  if (!isValidIndianPhone(raw)) return { ok: false, reason: "invalid_number" };
-  return { ok: true, phone: normalizeIndianPhone(raw) };
+  if (!isValidPhone(raw)) return { ok: false, reason: "invalid_number" };
+  return { ok: true, phone: normalizePhone(raw) };
 }
 
 function formatMoney(value) {
@@ -43,19 +44,56 @@ function formatMoney(value) {
   return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function buildBillCaption(bill, orgName, currencySymbol) {
+function buildBillCaption(bill, orgName, currencySymbol = "₹") {
   const store = String(orgName ?? "").trim() || "PharmaHub";
-  const number = bill.invoice?.invoiceNumber ?? "";
-  const total = formatMoney(bill.totals?.grandTotal);
-  return [
-    `Thank you for your purchase from ${store}.`,
+  const number = bill.invoice?.invoiceNumber ?? bill.invoiceNo ?? "N/A";
+
+  const d = bill.invoice?.invoiceDate || bill.createdAt || new Date();
+  const dateObj = d instanceof Date ? d : new Date(d);
+  const day = String(dateObj.getDate()).padStart(2, "0");
+  const month = String(dateObj.getMonth() + 1).padStart(2, "0");
+  const year = dateObj.getFullYear();
+  const dateStr = `${day}/${month}/${year}`;
+
+  const lines = [
+    `*${store}*`,
     "",
-    `Your bill ${number} is ready.`,
+    `Bill No: #${number}`,
+    `Date: ${dateStr}`,
     "",
-    `Total: ${currencySymbol}${total}`,
-    "",
-    "Please find your invoice attached.",
-  ].join("\n");
+    "Items:",
+  ];
+
+  const items = bill.items ?? [];
+  if (items.length > 0) {
+    for (const item of items) {
+      const name = item.medicineName || item.name || "Medicine";
+      const qty = item.quantity ?? 1;
+      const price = formatMoney((Number(item.unitPrice) || 0) * qty);
+      lines.push(`${name} × ${qty} — ${currencySymbol}${price}`);
+    }
+  } else {
+    lines.push("Prescription medicines");
+  }
+
+  const subtotal = formatMoney(bill.totals?.subtotal ?? bill.totals?.grandTotal);
+  const discount = Number(bill.totals?.discountAmount ?? 0);
+  const gst = Number(bill.totals?.taxAmount ?? 0);
+  const grandTotal = formatMoney(bill.totals?.grandTotal);
+
+  lines.push("");
+  lines.push(`Subtotal: ${currencySymbol}${subtotal}`);
+  if (discount > 0) {
+    lines.push(`Discount: ${currencySymbol}${formatMoney(discount)}`);
+  }
+  if (gst > 0) {
+    lines.push(`GST: ${currencySymbol}${formatMoney(gst)}`);
+  }
+  lines.push(`*Total: ${currencySymbol}${grandTotal}*`);
+  lines.push("");
+  lines.push("Thank you for visiting us.");
+
+  return lines.join("\n");
 }
 
 async function findWhatsAppIntegration(user) {
@@ -222,6 +260,71 @@ export async function deliverBillToWhatsApp({ bill, user }) {
   }
   logger.info(`[WhatsApp] Recipient: ${phoneCheck.phone} (bill ${bill._id})`);
 
+  const tenantId = resolveTenant(user);
+  const baileysActive = isSessionConnected(tenantId);
+
+  // 1. If zero-cost Baileys session is active, dispatch directly via Baileys!
+  if (baileysActive) {
+    summary.attempted = true;
+    const previous = bill.whatsappDelivery ?? {};
+    const attempts = Number(previous.attempts ?? 0) + 1;
+    const to = phoneCheck.phone;
+    summary.recipientPhone = to;
+    const caption = buildBillCaption(bill, user?.orgName, whatsAppConfig.currencySymbol);
+
+    let document;
+    try {
+      document = await prepareBillDocument(bill, whatsAppConfig.publicUrl);
+    } catch (err) {
+      logger.warn(`[Baileys] Could not build PDF document: ${err?.message}`);
+    }
+
+    logger.info(`[WhatsApp] Delivering bill ${bill._id} via Baileys WhatsApp Web session to ${to}`);
+    const sendRes = await sendBaileysMessage(tenantId, {
+      to,
+      text: caption,
+      documentPath: document?.path,
+      documentFilename: document?.filename,
+      caption,
+    });
+
+    if (sendRes.ok) {
+      const record = {
+        status: "sent",
+        recipientPhone: to,
+        messageId: sendRes.messageId,
+        sentAt: new Date(),
+        failedAt: null,
+        errorCode: null,
+        errorMessage: null,
+        attempts,
+      };
+      await persistDelivery(bill._id, record);
+      summary.status = "sent";
+      summary.messageId = sendRes.messageId;
+      logger.info(traceLog(trace, true, "sent (baileys)"));
+      return summary;
+    }
+
+    const record = {
+      status: "failed",
+      recipientPhone: to,
+      messageId: null,
+      sentAt: null,
+      failedAt: new Date(),
+      errorCode: sendRes.errorCode,
+      errorMessage: sendRes.errorMessage,
+      attempts,
+    };
+    await persistDelivery(bill._id, record);
+    summary.status = "failed";
+    summary.errorCode = sendRes.errorCode;
+    summary.errorMessage = sendRes.errorMessage;
+    logger.info(traceLog(trace, true, `failed (${sendRes.errorCode})`));
+    return summary;
+  }
+
+  // 2. Fallback to Meta Cloud API if configured
   if (!integration) {
     logger.info("[WhatsApp] Integration found: none connected — delivery skipped");
     return skip("not_connected");
@@ -232,9 +335,9 @@ export async function deliverBillToWhatsApp({ bill, user }) {
 
   if (!isWhatsAppConfigured()) {
     logger.warn(
-      `[whatsapp] WhatsApp Business is connected (${integration.config?.phone}) but server-level Meta credentials are missing (WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_ACCESS_TOKEN) — bill ${bill._id} saved without delivery`,
+      `[whatsapp] WhatsApp Business is connected (${integration.config?.phone}) but server-level Meta credentials are missing and Baileys session is not active — bill ${bill._id} saved without delivery`,
     );
-    return skip("server_not_configured");
+    return skip("not_connected");
   }
 
   summary.attempted = true;

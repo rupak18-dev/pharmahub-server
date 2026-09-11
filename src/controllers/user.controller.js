@@ -7,7 +7,7 @@ import { User } from "../models/User.js";
 import { Invitation } from "../models/Invitation.js";
 import { Role } from "../models/Role.js";
 import { recordAudit } from "../services/audit.service.js";
-import { toPublicUser, issueToken, toAuthUser } from "../services/auth.service.js";
+import { toPublicUser, issueToken, toAuthUser, setSessionCookie } from "../services/auth.service.js";
 import { sendEmail } from "../services/mailer.js";
 import {
   buildInvitationEmail,
@@ -1143,6 +1143,7 @@ export const acceptInvitation = asyncHandler(async (req, res) => {
     existing.featureAccess = featureAccess;
     existing.status = "active";
     existing.active = true;
+    existing.onboarded = true;
     await existing.save();
     user = existing;
   } else {
@@ -1163,6 +1164,7 @@ export const acceptInvitation = asyncHandler(async (req, res) => {
       featureAccess,
       status: "active",
       active: true,
+      onboarded: true,
     });
   }
 
@@ -1185,6 +1187,7 @@ export const acceptInvitation = asyncHandler(async (req, res) => {
   });
 
   const authToken = issueToken(user._id);
+  setSessionCookie(res, authToken, { remember: true });
   const publicUser = await toAuthUser(user.toObject());
   publicUser.profileCompletion = await saveProfileCompletion(user);
   return created(res, { token: authToken, user: publicUser }, "Invitation accepted");

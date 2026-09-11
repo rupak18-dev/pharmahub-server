@@ -208,16 +208,21 @@ export function setSessionCookie(res, token, { remember = true } = {}) {
   if (remember !== false) {
     options.maxAge = env.cookie.maxAgeDays * 24 * 60 * 60 * 1000;
   }
-  res.cookie(env.cookie.name, token, options);
+  res.cookie?.(env.cookie.name, token, options);
 }
 
 export function clearSessionCookie(res) {
-  res.clearCookie(env.cookie.name, {
+  res.clearCookie?.(env.cookie.name, {
     ...SESSION_COOKIE_OPTIONS,
   });
 }
 
 export function toPublicUser(user) {
+  const isOnboarded =
+    user.onboarded === true ||
+    Boolean(user.invitedBy) ||
+    (Boolean(user.role) && user.role !== "Owner" && user.role !== "Admin");
+
   return {
     id: String(user._id),
     name: user.name,
@@ -226,7 +231,7 @@ export function toPublicUser(user) {
     role: user.role,
     orgName: user.orgName,
     active: user.active,
-    onboarded: user.onboarded ?? true,
+    onboarded: isOnboarded,
     status: user.status ?? (user.active ? "active" : "suspended"),
     removedAt: user.removedAt ?? null,
     removedBy: user.removedBy ? String(user.removedBy) : null,

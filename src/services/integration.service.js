@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 import { ApiError } from "../core/ApiError.js";
 import { Integration } from "../models/Integration.js";
 import { findIntegrationMeta } from "../config/integrationCatalog.js";
-import { isValidIndianPhone, normalizeIndianPhone } from "../utils/phone.js";
+import { isValidPhone, normalizePhone } from "../utils/phone.js";
 import { isWhatsAppConfigured } from "../config/env.js";
 
 // Config keys that carry credentials are never persisted. The integration
@@ -95,12 +95,12 @@ function whatsAppPhoneFrom(config = {}) {
   if (!phone) {
     throw ApiError.badRequest("WhatsApp Business phone number is required");
   }
-  if (!isValidIndianPhone(phone)) {
+  if (!isValidPhone(phone)) {
     throw ApiError.badRequest(
-      "Enter a valid Indian mobile number (10 digits starting with 6-9, e.g. +91 98765 43210)",
+      "Enter a valid phone number (e.g. +91 98765 43210 or 10-digit mobile number)",
     );
   }
-  return normalizeIndianPhone(phone);
+  return normalizePhone(phone);
 }
 
 function baseRecord(user, key) {
