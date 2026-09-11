@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 
-import { env } from "../config/env.js";
 import { ApiError } from "../core/ApiError.js";
 import { Otp } from "../models/Otp.js";
 import { sendEmail } from "./email.service.js";
@@ -27,8 +26,7 @@ function generateCode() {
 /**
  * Generates a 6-digit code for `email`/`purpose`, stores a hash, and emails it.
  * `subject`/`html` override the default email copy; `{{code}}` inside them is
- * replaced with the generated code. Returns `devCode` in non-production so the
- * flow can be tested without an email provider.
+ * replaced with the generated code.
  */
 export async function createAndSendOtp({ email, purpose, subject, html }) {
   const normalizedEmail = email.toLowerCase();
@@ -50,19 +48,17 @@ export async function createAndSendOtp({ email, purpose, subject, html }) {
     { upsert: true },
   );
 
-  const transport = await sendEmail({
+  await sendEmail({
     to: normalizedEmail,
     subject: subject ?? "Your PharmaHub verification code",
     html:
-      html?.replace(/\{\{code\}\}/g, code) ??
+      html
+        ?.replace(/\{\{otp_code\}\}/g, code)
+        .replace(/\{\{code\}\}/g, code) ??
       `<p>Your PharmaHub verification code is:</p>
 <p style="font-size:24px;font-weight:bold;letter-spacing:4px">${code}</p>
 <p>It expires in 10 minutes. If you didn't request this code, you can ignore this email.</p>`,
   });
-
-  return {
-    devCode: env.isProduction || transport === "resend" ? undefined : code,
-  };
 }
 
 /** Verifies a code for `email`/`purpose` and consumes it once successful. */

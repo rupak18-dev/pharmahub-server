@@ -61,6 +61,22 @@ export function mergePermissionOverrides(rolePerms, overrides) {
   return merged;
 }
 
+function viewOnly(modules) {
+  return Object.fromEntries(
+    modules.map((mod) => [
+      mod,
+      { view: true, create: false, update: false, delete: false, approve: false, export: false },
+    ]),
+  );
+}
+const ROLELESS_PERMISSIONS = viewOnly([
+  "dashboard",
+  "medicines",
+  "batches",
+  "expiry",
+  "reports",
+]);
+
 export async function getRolePermissions(roleName) {
   if (!roleName) return {};
   const role = await Role.findOne({ name: roleName }).lean();
@@ -69,10 +85,15 @@ export async function getRolePermissions(roleName) {
   // module — fall back to the built-in default matrix for that role so
   // authorization keeps working on fresh/misprovisioned databases.
   if (!role || Object.keys(stored).length === 0) {
-    return DEFAULT_ROLE_PERMISSIONS[roleName] ?? {};
+    return DEFAULT_ROLE_PERMISSIONS[roleName] ?? ROLELESS_PERMISSIONS;
   }
   return stored;
 }
+
+// Role-less accounts (self-registered / Google-provisioned, awaiting an
+// explicit role assignment) get a read-only baseline so they can use the app
+// shell without being hard-locked out. All mutations stay denied until the
+// Owner grants a real role — this is NOT a functional default role.
 
 // Capability toggles (featureAccess) are applied LAST so they always win over
 // role defaults, per-user overrides and the accessIds whitelist. They express
@@ -102,7 +123,7 @@ function applyFeatureAccess(perms, featureAccess) {
 
 export async function getEffectivePermissions(user) {
   if (!user) return {};
-  const rolePerms = await getRolePermissions(user.role);
+  const rolePerms = user.role ? await getRolePermissions(user.role) : ROLELESS_PERMISSIONS;
   const baseMerged = mergePermissionOverrides(rolePerms, user.permissions);
 
   // If user has an explicit accessIds module whitelist configured, enforce it:

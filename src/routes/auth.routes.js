@@ -32,6 +32,16 @@ router.post(
   validate(authSchemas.resetPassword),
   authController.resetPassword,
 );
+router.post(
+  "/verify-email",
+  validate(authSchemas.verifyEmail),
+  authController.verifyEmail,
+);
+router.post(
+  "/resend-verification",
+  validate(authSchemas.resendVerification),
+  authController.resendVerification,
+);
 
 // Google OAuth
 router.get("/google", authController.googleStart);

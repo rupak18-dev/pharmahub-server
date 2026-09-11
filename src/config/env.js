@@ -149,8 +149,10 @@ export const env = {
     envVar("CORS_ORIGIN", "cors_origin") ??
     "*",
 
-  // Demo account passwords (development/demo flows only). Never hardcoded —
-  // they must be provided via environment configuration (.env).
+  // Demo-account passwords (development/demo flows ONLY). There are no code
+  // defaults — they must come from environment configuration. Demo auto-login
+  // degrades gracefully (401 + warn) when unset, and production ignores demos
+  // regardless.
   demoAccountPassword: process.env.DEMO_ACCOUNT_PASSWORD ?? "",
 
   devDemoPassword: process.env.DEV_DEMO_PASSWORD ?? "",
