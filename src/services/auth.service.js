@@ -22,15 +22,21 @@ export async function registerUser({ name, email, password, orgName }) {
   // No role is assigned here on purpose: self-registered accounts stay
   // role-less until the Owner explicitly assigns one (Users & Roles) —
   // never a silent default.
+  // Self-registered accounts must verify their email before first login, so
+  // they are created unverified. Google, demo, and invitation-created accounts
+  // rely on the schema default (emailVerified=true) and are never gated here.
   const user = await User.create({
     name,
     email: normalizedEmail,
     passwordHash,
     orgName,
+    emailVerified: false,
+    emailVerifiedAt: null,
   });
 
-  const token = signToken(user._id);
-  return { token, user: toPublicUser(user) };
+  // No session token is issued here: the account cannot sign in until the
+  // emailed code has been verified. The response is just the public profile.
+  return { user: toPublicUser(user) };
 }
 
 export async function updateProfile(userId, { name, role, orgName, onboarded }) {
@@ -59,24 +65,33 @@ export async function loginUser({ email, password }) {
 
   // Demo auto-login accounts exist ONLY when explicitly enabled via
   // ENABLE_DEMO_ACCOUNTS=true outside production — never part of the normal flow.
+  // demo@pharmahub.local is the seeded dev demo Owner (constants.development.demoOwner);
+  // @pharmahub.demo / demo@pharmahub.com provision the role from the email.
+  const demoOwner = constants.development.demoOwner;
+  const isDemoOwner = normalizedEmail === demoOwner.email;
   if (
     !user &&
     env.enableDemoAccounts &&
     !env.isProduction &&
-    (normalizedEmail.endsWith("@pharmahub.demo") || normalizedEmail === "demo@pharmahub.com")
+    (isDemoOwner ||
+      normalizedEmail.endsWith("@pharmahub.demo") ||
+      normalizedEmail === "demo@pharmahub.com")
   ) {
-    const passwordHash = await bcrypt.hash(env.demoAccountPassword, 10);
-    const role = normalizedEmail.includes("owner")
-      ? "Owner"
-      : normalizedEmail.includes("admin")
-        ? "Admin"
-        : "Pharmacist";
+    const demoPassword = isDemoOwner ? demoOwner.password : env.demoAccountPassword;
+    if (!demoPassword) {
+      logger.warn(
+        `[auth.login] demo login requested for ${normalizedEmail}, but no demo password is configured`,
+      );
+      throw ApiError.unauthorized("Invalid email or password");
+    }
+    const passwordHash = await bcrypt.hash(demoPassword, 10);
+    const role = isDemoOwner ? demoOwner.role : demoRoleFor(normalizedEmail);
     user = await User.create({
-      name: `PharmaHub ${role}`,
+      name: isDemoOwner ? demoOwner.name : `PharmaHub ${role}`,
       email: normalizedEmail,
       passwordHash,
       role,
-      orgName: "PharmaHub Pharmacy",
+      orgName: isDemoOwner ? demoOwner.orgName : "PharmaHub Pharmacy",
       active: true,
       status: "active",
     });
@@ -99,17 +114,38 @@ export async function loginUser({ email, password }) {
     throw ApiError.unauthorized("Invalid email or password");
   }
 
+  // Email-provider accounts that registered without verifying are kept out
+  // until they prove the inbox belongs to them. The `code` lets the frontend
+  // route to the verify screen instead of showing a generic login failure.
+  // Google (provider=google), demo, and Owner-invited accounts are verified by
+  // construction and never hit this gate.
+  if (user.provider === "email" && user.emailVerified === false) {
+    logger.info(`[auth.login] email_not_verified email=${normalizedEmail}`);
+    throw new ApiError(401, "Please verify your email before signing in", {
+      code: "email_not_verified",
+    });
+  }
+
   // The session credential is bound to THIS database user's id — never to a
   // role, a demo account, or any previously authenticated identity.
   const token = signToken(user._id);
   logger.info(
-    `[auth.login] requested email=${normalizedEmail} -> matched user id=${user._id} role=${user.role} (session userId=${user._id})`,
+    `[auth.login] email=${normalizedEmail} -> session userId=${user._id} role=${user.role}`,
   );
   const publicUser = await toAuthUser(user.toObject());
   publicUser.profileCompletion = computeProfileCompletion(user);
   return { token, user: publicUser };
 }
 
+// Demo email → role mapping for @pharmahub.demo / demo@pharmahub.com auto-login.
+function demoRoleFor(email) {
+  if (email.includes("owner")) return "Owner";
+  if (email.includes("admin")) return "Admin";
+  if (email.includes("cashier")) return "Cashier";
+  if (email.includes("keeper")) return "Store Keeper";
+  if (email.includes("inventory")) return "Inventory Manager";
+  return "Pharmacist";
+}
 
 export async function changePassword(userId, { currentPassword, newPassword }) {
   const user = await User.findById(userId).select("+passwordHash");
@@ -201,6 +237,8 @@ export function toPublicUser(user) {
     removedBy: user.removedBy ? String(user.removedBy) : null,
     phoneVerified: user.phoneVerified ?? false,
     phoneVerifiedAt: user.phoneVerifiedAt ?? null,
+    emailVerified: user.emailVerified ?? false,
+    emailVerifiedAt: user.emailVerifiedAt ?? null,
     avatarUrl: user.avatarUrl ?? null,
     logoUrl: user.logoUrl ?? null,
     tagline: user.tagline ?? null,

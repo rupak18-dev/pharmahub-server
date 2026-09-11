@@ -4,6 +4,9 @@ import { logger } from "../core/logger.js";
 import { getOnboarding, upsertOnboarding } from "../services/onboarding.service.js";
 import { User } from "../models/User.js";
 import { Role } from "../models/Role.js";
+import { sendEmail } from "../services/email.service.js";
+import { buildWelcomeEmail } from "../services/emailTemplates.js";
+import { env } from "../config/env.js";
 
 export const get = asyncHandler(async (req, res) => {
   const data = await getOnboarding(req.user._id);
@@ -55,6 +58,35 @@ export const save = asyncHandler(async (req, res) => {
     logger.info(
       `[onboarding.save] userId=${req.user._id} onboarded=true role=${update.role ?? "(unchanged)"} roleId=${update.roleId ?? null} org=${update.orgName ?? req.user.orgName ?? "(none)"}`,
     );
+
+    // First time the wizard completes: send the welcome email. Fire-and-forget —
+    // a delivery failure must never block or break onboarding, and repeating
+    // saves with `onboarded: true` must not send a second welcome.
+    if (!req.user.onboarded) {
+      const recipientName = (personal?.firstName?.trim() ||
+        req.user?.name) ||
+        "there";
+      const { subject, html, text } = buildWelcomeEmail({
+        name: recipientName,
+        getStartedUrl: `${env.frontendUrl}/dashboard`,
+      });
+      sendEmail({
+        to: req.user?.email,
+        subject,
+        html,
+        text,
+      })
+        .then(() => {
+          logger.info(
+            `[welcomeEmail] sent to ${req.user?.email} for userId=${req.user._id}`,
+          );
+        })
+        .catch((error) => {
+          logger.warn(
+            `[welcomeEmail] delivery failed for userId=${req.user._id} email=${req.user?.email}: ${error.message}`,
+          );
+        });
+    }
   }
   return ok(res, data, "Onboarding data saved");
 });
