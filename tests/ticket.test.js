@@ -8,6 +8,8 @@ import { Ticket } from "../src/models/Ticket.js";
 import { generateTicketId } from "../src/controllers/ticket.controller.js";
 import { ticketSchemas } from "../src/types/index.js";
 
+import { setServers } from "node:dns";
+
 const uri = process.env.MONGO_URI_TEST ?? env.mongoUri;
 let connected = false;
 
@@ -15,7 +17,17 @@ try {
   await mongoose.connect(uri, { serverSelectionTimeoutMS: 4000 });
   connected = true;
 } catch (err) {
-  console.log(`[test] MongoDB unavailable (${err?.message ?? err}); Ticket integration tests skipped`);
+  if (err?.message?.includes("ECONNREFUSED") || err?.code === "ECONNREFUSED") {
+    try {
+      setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);
+      await mongoose.connect(uri, { serverSelectionTimeoutMS: 8000 });
+      connected = true;
+    } catch (retryErr) {
+      console.log(`[test] MongoDB unavailable (${retryErr?.message ?? retryErr}); Ticket integration tests skipped`);
+    }
+  } else {
+    console.log(`[test] MongoDB unavailable (${err?.message ?? err}); Ticket integration tests skipped`);
+  }
 }
 
 let server;

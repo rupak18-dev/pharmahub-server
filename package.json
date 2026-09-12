@@ -41,15 +41,9 @@
     "multer": "^2.2.0",
     "node-cron": "^4.6.0",
     "nodemailer": "^9.0.5",
-<<<<<<< HEAD
-    "resend": "^6.20.0",
-    "tesseract.js": "^7.0.0",
-    "resend": "^6.20.0",
-=======
     "qrcode": "^1.5.4",
     "resend": "^6.20.0",
     "tesseract.js": "^7.0.0",
->>>>>>> 4c1cca6e78bcf5f8c7ddaf532dfffb77d083228f
     "zod": "^3.24.1"
   },
   "devDependencies": {

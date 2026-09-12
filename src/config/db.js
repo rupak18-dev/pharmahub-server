@@ -25,9 +25,20 @@ export async function connectDB() {
     logger.warn("[db] disconnected from MongoDB");
   });
 
-  await mongoose.connect(env.mongoUri, {
-    serverSelectionTimeoutMS: 30000,
-  });
+  try {
+    await mongoose.connect(env.mongoUri, {
+      serverSelectionTimeoutMS: 30000,
+    });
+  } catch (err) {
+    if (err.message?.includes("ECONNREFUSED") || err.code === "ECONNREFUSED") {
+      setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);
+      await mongoose.connect(env.mongoUri, {
+        serverSelectionTimeoutMS: 30000,
+      });
+    } else {
+      throw err;
+    }
+  }
   return mongoose.connection;
 }
 
