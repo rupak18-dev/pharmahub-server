@@ -434,3 +434,62 @@ export const integrationSchemas = {
     config: integrationConfigSchema.optional(),
   }),
 };
+
+export const ticketSchemas = {
+  create: z.preprocess(
+    (raw) => {
+      if (!raw || typeof raw !== "object") return raw;
+      const body = { ...raw };
+      // Map common frontend field aliases
+      if (!body.title && body.subject) body.title = body.subject;
+      if (!body.issueType && (body.category || body.type || body.issue)) {
+        body.issueType = body.category || body.type || body.issue;
+      }
+      if (!body.description && (body.message || body.details || body.desc)) {
+        body.description = body.message || body.details || body.desc;
+      }
+      if (!body.severity && (body.priority || body.level)) {
+        body.severity = body.priority || body.level;
+      }
+      if (typeof body.severity === "string" && body.severity.trim() !== "") {
+        body.severity = body.severity.toLowerCase().trim();
+      } else {
+        body.severity = "medium";
+      }
+      if (body.screenshot === undefined && (body.image || body.attachment || body.file)) {
+        body.screenshot = body.image || body.attachment || body.file;
+      }
+      return body;
+    },
+    z.object({
+      title: z
+        .string({ required_error: "Title is required" })
+        .trim()
+        .min(3, "Title must be at least 3 characters")
+        .max(250, "Title cannot exceed 250 characters"),
+      issueType: z
+        .string({ required_error: "Issue type is required" })
+        .trim()
+        .min(1, "Issue type is required")
+        .default("general_inquiry"),
+      description: z
+        .string({ required_error: "Description is required" })
+        .trim()
+        .min(5, "Description must be at least 5 characters")
+        .max(5000, "Description cannot exceed 5000 characters"),
+      severity: z.enum(["low", "medium", "high", "critical"]).default("medium"),
+      screenshot: z
+        .string()
+        .nullable()
+        .optional()
+        .or(z.literal("")),
+      userName: z.string().trim().nullable().optional(),
+      userEmail: z.string().trim().nullable().optional().or(z.literal("")),
+      userRole: z.string().trim().nullable().optional(),
+      orgName: z.string().trim().nullable().optional(),
+    }),
+  ),
+  updateStatus: z.object({
+    status: z.enum(["open", "in_progress", "resolved", "closed"]),
+  }),
+};

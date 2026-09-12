@@ -20,3 +20,4 @@ export { ReportBill } from "./ReportBill.js";
 export { Integration } from "./Integration.js";
 export { Otp } from "./Otp.js";
 export { Onboarding } from "./Onboarding.js";
+export { Ticket } from "./Ticket.js";
