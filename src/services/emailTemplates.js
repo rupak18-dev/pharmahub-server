@@ -515,3 +515,131 @@ ${link}
 If you didn't request a password reset, you can safely ignore this email — your password won't change.`,
   });
 }
+
+const TICKET_ISSUE_TYPE_LABELS = {
+  billing_pos: "Billing, POS & Invoicing Issue",
+  inventory_stock: "Inventory & Stock Discrepancy",
+  medicines_batches: "Medicine Catalog & Batch Tracking",
+  expiry_returns: "Expiry & Returns Management",
+  purchases_suppliers: "Purchase Orders & Supplier Sync",
+  user_access: "User Access, Roles & Permissions",
+  reports_export: "Reports, Analytics & Data Export",
+  hardware_printers: "Hardware, Printers & Scanner Integration",
+  general_inquiry: "General Inquiry or Feature Request",
+};
+
+export function buildTicketConfirmationEmail({ ticket, link }) {
+  const greeting = ticket.userName?.trim()
+    ? `Hello ${escapeHtml(ticket.userName.trim())},`
+    : "Hello,";
+  const ticketId = escapeHtml(ticket.ticketId || "Pending");
+  const title = escapeHtml(ticket.title || "");
+  const categoryLabel = escapeHtml(
+    TICKET_ISSUE_TYPE_LABELS[ticket.issueType] ||
+      ticket.issueType?.replace(/_/g, " ") ||
+      "General Inquiry",
+  );
+  const severity = escapeHtml((ticket.severity || "medium").toLowerCase());
+  const status = escapeHtml(ticket.status || "open");
+  const createdDate = new Date(ticket.createdAt || Date.now()).toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  const exactDescription = escapeHtml(ticket.description || "");
+  const trackLink = link || `${env.frontendUrl}/support`;
+
+  const severityColors = {
+    low: { bg: "#ecfdf5", text: "#065f46", border: "#a7f3d0" },
+    medium: { bg: "#fffbeb", text: "#92400e", border: "#fde68a" },
+    high: { bg: "#fff7ed", text: "#9a3412", border: "#fed7aa" },
+    critical: { bg: "#fef2f2", text: "#991b1b", border: "#fecaca" },
+  };
+  const badgeStyle = severityColors[ticket.severity?.toLowerCase()] || severityColors.medium;
+
+  return wrap({
+    subject: `[${ticket.ticketId}] Support Request Received: ${ticket.title}`,
+    heading: "Your Support Request Has Been Received",
+    htmlBody: `
+      <p style="margin:0 0 12px;font-size:15px;color:#374151;line-height:1.6;">${greeting}</p>
+      <p style="margin:0 0 16px;font-size:15px;color:#374151;line-height:1.6;">
+        Thank you for contacting PharmaHub Support. Your ticket has been registered with our support team and assigned the unique reference ID below:
+      </p>
+
+      <div style="margin:16px 0;padding:14px 18px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;text-align:center;">
+        <span style="font-size:12px;text-transform:uppercase;color:#64748b;font-weight:600;letter-spacing:0.5px;">Ticket Reference ID</span>
+        <div style="font-family:Consolas, Monaco, 'Courier New', monospace;font-size:22px;font-weight:700;color:#0f172a;letter-spacing:1px;margin-top:4px;">
+          ${ticketId}
+        </div>
+      </div>
+
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:18px 0;border:1px solid #e6e8eb;border-radius:8px;overflow:hidden;font-size:14px;">
+        <tr style="background:#f9fafb;border-bottom:1px solid #e6e8eb;">
+          <td style="padding:8px 14px;color:#6b7280;width:35%;font-weight:600;">Issue Title</td>
+          <td style="padding:8px 14px;color:#111827;font-weight:600;">${title}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:8px 14px;color:#6b7280;">Category</td>
+          <td style="padding:8px 14px;color:#111827;">${categoryLabel}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:8px 14px;color:#6b7280;">Severity</td>
+          <td style="padding:8px 14px;">
+            <span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;text-transform:capitalize;background:${badgeStyle.bg};color:${badgeStyle.text};border:1px solid ${badgeStyle.border};">
+              ${severity}
+            </span>
+          </td>
+        </tr>
+        <tr style="border-bottom:1px solid #f3f4f6;">
+          <td style="padding:8px 14px;color:#6b7280;">Status</td>
+          <td style="padding:8px 14px;color:#111827;text-transform:capitalize;">${status}</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 14px;color:#6b7280;">Submitted At</td>
+          <td style="padding:8px 14px;color:#111827;">${createdDate}</td>
+        </tr>
+      </table>
+
+      <div style="margin:18px 0;">
+        <span style="font-size:13px;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:0.4px;">Submitted Description</span>
+        <div style="margin-top:6px;padding:12px 14px;background:#f8fafc;border-left:3px solid #2563eb;border-radius:4px;font-size:14px;color:#334155;line-height:1.6;white-space:pre-wrap;">${exactDescription}</div>
+      </div>
+
+      <div style="margin:20px 0 10px;padding:14px 16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;">
+        <strong style="color:#166534;font-size:14px;display:block;margin-bottom:6px;">Next Steps & Support SLA</strong>
+        <ul style="margin:0;padding-left:18px;font-size:13px;color:#15803d;line-height:1.6;">
+          <li>Our pharmacy support engineers review priority issues within 1–2 hours and standard tickets within 24 hours.</li>
+          <li>Please quote your Ticket ID <strong>${ticketId}</strong> if you contact our support phone line or follow up via email.</li>
+          <li>You can monitor updates, responses, and resolution status live in PharmaHub.</li>
+        </ul>
+      </div>
+
+      ${actionButton("Track Ticket in PharmaHub", trackLink)}
+      <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.6;">
+        If you did not submit this support request, please contact your store administrator immediately.
+      </p>`,
+    textBody: `${greeting}
+
+Thank you for contacting PharmaHub Support. Your ticket has been registered with our support team.
+
+Ticket ID: ${ticket.ticketId}
+Title: ${ticket.title}
+Category: ${categoryLabel}
+Severity: ${ticket.severity}
+Status: ${ticket.status || "open"}
+Submitted At: ${createdDate}
+
+Submitted Description:
+${ticket.description}
+
+Next Steps & Support SLA:
+- Our pharmacy support engineers review priority issues within 1-2 hours and standard tickets within 24 hours.
+- Please quote your Ticket ID (${ticket.ticketId}) if you contact our support phone line or follow up via email.
+- You can monitor updates and resolution status live in PharmaHub.
+
+Track your ticket online:
+${trackLink}
+
+Regards,
+PharmaHub Support Team`,
+  });
+}

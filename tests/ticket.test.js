@@ -7,6 +7,7 @@ import { env } from "../src/config/env.js";
 import { Ticket } from "../src/models/Ticket.js";
 import { generateTicketId } from "../src/controllers/ticket.controller.js";
 import { ticketSchemas } from "../src/types/index.js";
+import { buildTicketConfirmationEmail } from "../src/services/emailTemplates.js";
 
 import { setServers } from "node:dns";
 
@@ -149,6 +150,59 @@ describe("ticketSchemas Validation (Unit)", () => {
   });
 });
 
+describe("Ticket Email Notification (Unit)", () => {
+  test("builds professional confirmation email with ticket ID, description, SLA, and links", () => {
+    const ticket = {
+      ticketId: "PH-TKT-2026-98765",
+      title: "Barcode scanner not reading Paracetamol QR",
+      issueType: "medicines_batches",
+      description: "Scanner beeps but does not add item to POS cart. Checked USB cable and device drivers.",
+      severity: "high",
+      status: "open",
+      userName: "Rupak Sharma",
+      userEmail: "rupak@pharmahub.co",
+      createdAt: new Date("2026-09-13T10:30:00.000Z"),
+    };
+
+    const email = buildTicketConfirmationEmail({ ticket, link: "http://localhost:8080/support" });
+
+    assert.ok(email.subject.includes("PH-TKT-2026-98765"));
+    assert.ok(email.subject.includes("Barcode scanner not reading Paracetamol QR"));
+
+    // HTML checks
+    assert.ok(email.html.includes("PH-TKT-2026-98765"));
+    assert.ok(email.html.includes("Rupak Sharma"));
+    assert.ok(email.html.includes("Medicine Catalog &amp; Batch Tracking"));
+    assert.ok(email.html.includes("high"));
+    assert.ok(email.html.includes("Scanner beeps but does not add item to POS cart"));
+    assert.ok(email.html.includes("Next Steps & Support SLA"));
+    assert.ok(email.html.includes("http://localhost:8080/support"));
+
+    // Plain text checks
+    assert.ok(email.text.includes("PH-TKT-2026-98765"));
+    assert.ok(email.text.includes("Scanner beeps but does not add item to POS cart"));
+    assert.ok(email.text.includes("http://localhost:8080/support"));
+  });
+
+  test("escapes HTML in user description and title to prevent injection", () => {
+    const ticket = {
+      ticketId: "PH-TKT-2026-11223",
+      title: "Test <script>alert(1)</script>",
+      issueType: "general_inquiry",
+      description: "Sample <img src=x onerror=alert('xss')> & critical info",
+      severity: "critical",
+      userName: "Tester <script>",
+    };
+
+    const email = buildTicketConfirmationEmail({ ticket });
+    assert.ok(!email.html.includes("<script>alert(1)</script>"));
+    assert.ok(!email.html.includes("<img src=x"));
+    assert.ok(email.html.includes("&lt;script&gt;alert(1)&lt;/script&gt;"));
+    assert.ok(email.html.includes("&lt;img src=x"));
+    assert.ok(email.html.includes("&amp; critical info"));
+  });
+});
+
 describe(
   "Support Ticket System (Integration)",
   { skip: !connected && "MongoDB not available - skipped" },
@@ -244,6 +298,7 @@ describe(
       assert.equal(json.data.userRole, "Pharmacist");
       assert.equal(json.data.orgName, "Apollo Pharmacy");
       assert.equal(json.data.userId, null);
+      assert.equal(typeof json.data.confirmationEmailSent, "boolean");
 
       createdTicket = json.data;
     });

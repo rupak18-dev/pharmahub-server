@@ -1,11 +1,15 @@
 import mongoose from "mongoose";
 
+import { env } from "../config/env.js";
+import { logger } from "../core/logger.js";
 import { asyncHandler } from "../core/asyncHandler.js";
 import { ApiError } from "../core/ApiError.js";
 import { ok, created } from "../core/responses.js";
 import { buildPagination } from "../utils/pagination.js";
 import { Ticket } from "../models/Ticket.js";
 import { recordAudit } from "../services/audit.service.js";
+import { sendEmail } from "../services/mailer.js";
+import { buildTicketConfirmationEmail } from "../services/emailTemplates.js";
 
 /**
  * Generate a unique ticket ID in format PH-TKT-YYYY-#####
@@ -70,6 +74,57 @@ export const createTicket = asyncHandler(async (req, res) => {
     entityId: ticket._id,
     ip: req.ip,
   });
+
+  // Automatically dispatch confirmation email immediately after successful ticket creation
+  if (ticket.userEmail && !ticket.confirmationEmailSent) {
+    try {
+      const emailContent = buildTicketConfirmationEmail({
+        ticket,
+        link: `${env.frontendUrl}/support`,
+      });
+      const sendResult = await sendEmail({
+        to: ticket.userEmail,
+        subject: emailContent.subject,
+        html: emailContent.html,
+        text: emailContent.text,
+      });
+
+      if (!sendResult?.skipped) {
+        ticket.confirmationEmailSent = true;
+        await Ticket.updateOne({ _id: ticket._id }, { confirmationEmailSent: true });
+      }
+
+      logger.info(
+        `[ticket.create] confirmation email ${sendResult?.skipped ? "skipped (SMTP not configured)" : "sent"} to ${ticket.userEmail} for ticket ${ticket.ticketId}`,
+      );
+
+      recordAudit({
+        userId: ticket.userId,
+        userName: ticket.userName,
+        action: sendResult?.skipped
+          ? "Ticket confirmation email skipped (SMTP not configured)"
+          : "Ticket confirmation email sent",
+        entityType: "ticket",
+        entityId: ticket._id,
+        details: { ticketId: ticket.ticketId, recipient: ticket.userEmail },
+        ip: req.ip,
+      });
+    } catch (emailErr) {
+      // Email failure must never break or rollback successful ticket creation
+      logger.warn(
+        `[ticket.create] Failed to send confirmation email to ${ticket.userEmail} (ticket ${ticket.ticketId}): ${emailErr.message}`,
+      );
+      recordAudit({
+        userId: ticket.userId,
+        userName: ticket.userName,
+        action: "Ticket confirmation email failed",
+        entityType: "ticket",
+        entityId: ticket._id,
+        details: { ticketId: ticket.ticketId, recipient: ticket.userEmail, error: emailErr.message },
+        ip: req.ip,
+      });
+    }
+  }
 
   return created(res, ticket, "Ticket has been raised successfully");
 });

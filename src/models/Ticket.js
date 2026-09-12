@@ -31,6 +31,7 @@ const ticketSchema = new Schema(
     userEmail: { type: String, trim: true, lowercase: true, default: "" },
     userRole: { type: String, default: "Staff" },
     orgName: { type: String, default: "PharmaHub Pharmacy" },
+    confirmationEmailSent: { type: Boolean, default: false },
   },
   { timestamps: true },
 );
