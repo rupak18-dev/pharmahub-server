@@ -32,6 +32,7 @@ const invitationSchema = new Schema(
     // acceptance so the staff directory shows the same department the Owner
     // entered when inviting.
     department: { type: String, trim: true, default: null },
+    designation: { type: String, trim: true, default: null },
     cancelledAt: { type: Date, default: null },
     cancelledBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
     status: {

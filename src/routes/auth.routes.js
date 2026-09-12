@@ -1,7 +1,7 @@
 import { Router } from "express";
 
 import { validate } from "../middlewares/validate.js";
-import { auth } from "../middlewares/auth.js";
+import { auth, authOptional } from "../middlewares/auth.js";
 import { authSchemas } from "../types/index.js";
 import * as authController from "../controllers/auth.controller.js";
 
@@ -19,7 +19,10 @@ router.post(
   authController.login,
 );
 
+router.post("/logout", authOptional, authController.logout);
+
 router.get("/me", auth, authController.me);
+
 router.put("/profile", auth, validate(authSchemas.profile), authController.updateMyProfile);
 router.post("/change-password", auth, validate(authSchemas.changePassword), authController.updatePassword);
 router.post(

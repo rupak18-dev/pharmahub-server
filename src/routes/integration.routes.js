@@ -23,6 +23,11 @@ router.get("/gmail/connect", authorize("integrations", "update"), gmailControlle
 router.post("/gmail/test", authorize("integrations", "update"), gmailController.sendTest);
 router.delete("/gmail", authorize("integrations", "update"), gmailController.disconnect);
 
+// WhatsApp Web Session routes (Baileys zero-cost QR pairing)
+router.get("/whatsapp/session", authorize("integrations", "view"), integrationController.getWhatsAppSession);
+router.post("/whatsapp/start", authorize("integrations", "update"), integrationController.startWhatsAppSession);
+router.post("/whatsapp/logout", authorize("integrations", "update"), integrationController.logoutWhatsAppSession);
+
 router.get("/", authorize("integrations", "view"), integrationController.listIntegrations);
 router.get("/:id", authorize("integrations", "view"), integrationController.getIntegration);
 router.post(

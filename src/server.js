@@ -5,6 +5,7 @@ import { logger } from "./core/logger.js";
 import { Role } from "./models/Role.js";
 import { startScheduledReportWorker } from "./jobs/scheduledReports.job.js";
 import { validateEmailConfig } from "./services/mailer.js";
+import { autoRestoreSessions } from "./services/baileys.service.js";
 
 async function bootstrap() {
   try {
@@ -25,10 +26,10 @@ async function bootstrap() {
       logger.info(`PharmaHub API running at http://localhost:${env.port} (${env.nodeEnv})`);
     });
 
-    // Scheduled report background worker — started only when the server is
-    // actually serving (never during tests).
+    // Scheduled report background worker & WhatsApp session auto-restoration
     if (!env.isTest) {
       startScheduledReportWorker();
+      autoRestoreSessions();
     }
 
     const shutdown = async (signal) => {

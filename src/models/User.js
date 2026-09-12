@@ -39,10 +39,13 @@ const userSchema = new Schema(
       select: false,
     },
 
+    // Role is assigned EXPLICITLY — by the Owner via Users & Roles, or via
+    // the role carried on a staff invitation. There is intentionally NO
+    // default: self-registered / Google-provisioned accounts stay role-less
+    // (neutral) until someone assigns them a real role.
     role: {
       type: String,
-      required: true,
-      default: "Pharmacist",
+      default: "",
       index: true,
     },
 
@@ -107,6 +110,20 @@ const userSchema = new Schema(
       default: null,
     },
 
+    invitedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true,
+    },
+
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true,
+    },
+
     phoneVerified: {
       type: Boolean,
       default: false,
@@ -119,6 +136,11 @@ const userSchema = new Schema(
 
     // Profile fields
     avatarUrl: {
+      type: String,
+      trim: true,
+    },
+
+    logoUrl: {
       type: String,
       trim: true,
     },

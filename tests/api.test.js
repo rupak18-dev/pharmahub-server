@@ -87,7 +87,7 @@ describe(
       const body = await res.json();
       // The JWT must never appear in the response body.
       assert.equal(body.data.token, undefined);
-      assert.equal(body.data.user.role, "Pharmacist");
+      assert.equal(body.data.user.role, "");
       cookie = sessionCookie(res);
     });
 
