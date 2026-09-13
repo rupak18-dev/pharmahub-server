@@ -26,6 +26,15 @@ async function bootstrap() {
       logger.info(`PharmaHub API running at http://localhost:${env.port} (${env.nodeEnv})`);
     });
 
+    server.on("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        logger.error(`Port ${env.port} is already in use. Run "npm run kill:port" to free it, or change PORT in .env.`);
+      } else {
+        logger.error(`Server listen error: ${err.message}`, err);
+      }
+      process.exit(1);
+    });
+
     // Scheduled report background worker & WhatsApp session auto-restoration
     if (!env.isTest) {
       startScheduledReportWorker();

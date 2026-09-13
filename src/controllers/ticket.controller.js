@@ -62,6 +62,16 @@ export const createTicket = asyncHandler(async (req, res) => {
     orgName: isAuth
       ? req.user.orgName || req.body.orgName || "PharmaHub Pharmacy"
       : req.body.orgName || "PharmaHub Pharmacy",
+    activityTimeline: [
+      {
+        event: "ticket_raised",
+        status: "open",
+        title: "Ticket Raised",
+        description: "Ticket was created successfully.",
+        timestamp: new Date(),
+        by: isAuth ? req.user.name || "User" : req.body.userName || "User",
+      },
+    ],
   };
 
   const ticket = await Ticket.create(ticketData);
@@ -233,6 +243,32 @@ export const getTicket = asyncHandler(async (req, res) => {
     throw ApiError.notFound("Ticket not found");
   }
 
+  // Scoping check: The logged-in user must only be able to view their own tickets.
+  // Admins and Owners have global view permissions.
+  const isAdminOrOwner = req.user && ["Admin", "Owner"].includes(req.user.role);
+  if (!isAdminOrOwner && req.user) {
+    const isOwner =
+      (ticket.userId && String(ticket.userId) === String(req.user._id)) ||
+      (ticket.userEmail && req.user.email && ticket.userEmail.toLowerCase() === req.user.email.toLowerCase());
+    if (!isOwner) {
+      throw ApiError.forbidden("You do not have permission to view this ticket");
+    }
+  }
+
+  // Ensure activityTimeline always has at least the initial creation event
+  if (!ticket.activityTimeline || ticket.activityTimeline.length === 0) {
+    ticket.activityTimeline = [
+      {
+        event: "ticket_raised",
+        status: "open",
+        title: "Ticket Raised",
+        description: "Ticket was created successfully.",
+        timestamp: ticket.createdAt,
+        by: ticket.userName || "User",
+      },
+    ];
+  }
+
   return res.status(200).json({
     success: true,
     data: ticket,
@@ -241,20 +277,52 @@ export const getTicket = asyncHandler(async (req, res) => {
 
 /**
  * PATCH /api/v1/tickets/:id/status
- * Update ticket status
+ * Update ticket status and record activity history
  */
 export const updateTicketStatus = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { status } = req.body;
+  const { status, description } = req.body;
 
   const isObjectId = mongoose.Types.ObjectId.isValid(id);
   const query = isObjectId
     ? { $or: [{ _id: id }, { ticketId: id.toUpperCase() }] }
     : { ticketId: id.toUpperCase() };
 
+  const eventTitleMap = {
+    open: "Ticket Raised",
+    acknowledged: "Ticket Acknowledged",
+    assigned: "Ticket Assigned",
+    in_progress: "In Progress",
+    waiting_for_user: "Waiting for User",
+    resolved: "Resolved",
+    closed: "Closed",
+  };
+
+  const defaultDescMap = {
+    open: "Ticket was reopened.",
+    acknowledged: "Support team received the ticket.",
+    assigned: "Ticket assigned to support team.",
+    in_progress: "Support team is investigating the issue.",
+    waiting_for_user: "Support team requested additional details from the user.",
+    resolved: "Issue has been resolved.",
+    closed: "Ticket was closed.",
+  };
+
+  const activityItem = {
+    event: status,
+    status,
+    title: eventTitleMap[status] || status,
+    description: description || defaultDescMap[status] || `Ticket status updated to ${status}.`,
+    timestamp: new Date(),
+    by: req.user?.name || "Support Team",
+  };
+
   const ticket = await Ticket.findOneAndUpdate(
     query,
-    { $set: { status } },
+    {
+      $set: { status },
+      $push: { activityTimeline: activityItem },
+    },
     { new: true, runValidators: true },
   );
 

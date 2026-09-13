@@ -490,6 +490,16 @@ export const ticketSchemas = {
     }),
   ),
   updateStatus: z.object({
-    status: z.enum(["open", "in_progress", "resolved", "closed"]),
+    status: z.enum([
+      "open",
+      "acknowledged",
+      "assigned",
+      "in_progress",
+      "waiting_for_user",
+      "resolved",
+      "closed",
+    ]),
+    description: z.string().trim().max(1000).optional(),
+    note: z.string().trim().max(1000).optional(),
   }),
 };

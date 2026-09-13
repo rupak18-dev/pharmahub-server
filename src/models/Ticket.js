@@ -1,5 +1,17 @@
 import { Schema, model } from "mongoose";
 
+const ticketActivitySchema = new Schema(
+  {
+    event: { type: String, required: true },
+    status: { type: String, required: true },
+    title: { type: String, default: "" },
+    description: { type: String, required: true },
+    timestamp: { type: Date, default: Date.now },
+    by: { type: String, default: "Support Team" },
+  },
+  { _id: true },
+);
+
 const ticketSchema = new Schema(
   {
     ticketId: {
@@ -22,7 +34,7 @@ const ticketSchema = new Schema(
     screenshot: { type: String, default: null },
     status: {
       type: String,
-      enum: ["open", "in_progress", "resolved", "closed"],
+      enum: ["open", "acknowledged", "assigned", "in_progress", "waiting_for_user", "resolved", "closed"],
       default: "open",
       index: true,
     },
@@ -32,6 +44,10 @@ const ticketSchema = new Schema(
     userRole: { type: String, default: "Staff" },
     orgName: { type: String, default: "PharmaHub Pharmacy" },
     confirmationEmailSent: { type: Boolean, default: false },
+    activityTimeline: {
+      type: [ticketActivitySchema],
+      default: [],
+    },
   },
   { timestamps: true },
 );

@@ -1,10 +1,25 @@
 import mongoose from "mongoose";
-import { getServers, setServers } from "node:dns";
+import { getServers, setServers, setDefaultResultOrder } from "node:dns";
 
 import { env } from "./env.js";
 import { logger } from "../core/logger.js";
 
+// Ensure IPv4 is preferred across all DNS lookups in Node.js.
+// MongoDB Atlas replica set hostnames often return IPv6 (NAT64) addresses
+// which fail or hang indefinitely on many local networks/ISPs, leading
+// to getaddrinfo ENOTFOUND, 30s connection timeouts, and ReplicaSetNoPrimary drops.
+try {
+  setDefaultResultOrder("ipv4first");
+} catch {
+  // Not supported in older Node versions
+}
+
 function ensureWorkingDns() {
+  try {
+    setDefaultResultOrder("ipv4first");
+  } catch {
+    // Not supported in older Node versions
+  }
   const servers = getServers();
   const stuckOnLoopback = servers.every((s) => s === "127.0.0.1" || s === "::1");
   if (stuckOnLoopback) {
@@ -30,7 +45,13 @@ export async function connectDB() {
       serverSelectionTimeoutMS: 30000,
     });
   } catch (err) {
-    if (err.message?.includes("ECONNREFUSED") || err.code === "ECONNREFUSED") {
+    if (
+      err.message?.includes("ECONNREFUSED") ||
+      err.code === "ECONNREFUSED" ||
+      err.message?.includes("ENOTFOUND") ||
+      err.code === "ENOTFOUND" ||
+      err.name === "MongoServerSelectionError"
+    ) {
       setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);
       await mongoose.connect(env.mongoUri, {
         serverSelectionTimeoutMS: 30000,
