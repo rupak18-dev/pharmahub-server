@@ -9,6 +9,7 @@
     "start": "node src/server.js",
     "kill:port": "node scripts/kill-port.js",
     "seed": "node scripts/seed.js",
+    "seed:user": "node scripts/seed-user.js",
     "migrate:batches": "node scripts/migrate-batches.js",
     "test": "node --test \"tests/*.test.js\"",
     "lint": "eslint src tests scripts"

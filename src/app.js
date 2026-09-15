@@ -54,7 +54,7 @@ export function createApp() {
       credentials: true,
     }),
   );
-  app.use(express.json({ limit: "2mb" }));
+  app.use(express.json({ limit: "15mb" }));
   app.use(express.urlencoded({ extended: true }));
 
   // CSRF protection for cookie-authenticated mutations:
