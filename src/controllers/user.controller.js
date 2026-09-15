@@ -237,7 +237,18 @@ export const getUser = asyncHandler(async (req, res) => {
 // effective permissions. Registered before /:id so "me" is never treated as an
 // ObjectId. This is the primary auth hydration endpoint used by the frontend.
 export const getMe = asyncHandler(async (req, res) => {
+  // Identity must never be served from any HTTP cache — a cached response
+  // could return the PREVIOUS user after a logout + different login.
+  res.set("Cache-Control", "no-store");
   const user = await User.findById(req.user._id).lean();
+  if (!user) {
+    // Middleware already verified the user exists; this is a safety fallback
+    // for the renderer race between auth and lookup.
+    logger.warn(`[users.me] token userId=${req.user._id} not found in database`);
+    const publicUser = await toAuthUser(req.user);
+    publicUser.profileCompletion = computeProfileCompletion(req.user);
+    return ok(res, publicUser);
+  }
   const publicUser = await toAuthUser(user);
   publicUser.profileCompletion = computeProfileCompletion(user);
   return ok(res, publicUser);
@@ -348,6 +359,11 @@ export const removeAvatar = asyncHandler(async (req, res) => {
 });
 
 export const createUser = asyncHandler(async (req, res) => {
+  // Privilege-escalation guard: only an Owner may create Owner accounts —
+  // mirrors the same constraint enforced on role changes in updateUser.
+  if (req.body.role === "Owner" && req.user?.role !== "Owner") {
+    throw ApiError.forbidden("Only the Owner can create Owner accounts");
+  }
   await assertRoleExists(req.body.role);
   const existing = await User.findOne({ email: req.body.email.toLowerCase() }).collation({
     locale: "en",

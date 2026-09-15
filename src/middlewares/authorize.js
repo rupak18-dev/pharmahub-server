@@ -10,13 +10,15 @@ export function authorize(module, action = "view") {
       }
 
       const roleName = req.user.role;
-      if (!roleName) throw ApiError.forbidden("Missing role");
 
       // Owner has full access across the system
       if (roleName === "Owner") {
         return next();
       }
 
+      // Role-less / unassigned-role accounts are covered by the minimal
+      // read-only baseline from getEffectivePermissions — a missing role on
+      // its own is not reason to hard-deny every module.
       const permissions = await getEffectivePermissions(req.user);
       if (!permissions) throw ApiError.forbidden(`Permissions not configured`);
 

@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { asyncHandler } from "../core/asyncHandler.js";
 import { ok, created } from "../core/responses.js";
 import { logger } from "../core/logger.js";
+import { ApiError } from "../core/ApiError.js";
 import { env } from "../config/env.js";
 import {
   loginUser,
@@ -18,14 +19,14 @@ import {
   googleAuthUrl,
   exchangeCodeForProfile,
 } from "../services/googleAuth.service.js";
-import { createAndSendOtp } from "../services/otp.service.js";
+import { createAndSendOtp, verifyOtp } from "../services/otp.service.js";
+import { buildVerificationEmail } from "../services/emailTemplates.js";
 import { recordAudit } from "../services/audit.service.js";
 import { computeProfileCompletion } from "../services/profileCompletion.service.js";
 import { User } from "../models/User.js";
 
 export const register = asyncHandler(async (req, res) => {
   const result = await registerUser(req.body);
-  setSessionCookie(res, result.token, { remember: true });
   recordAudit({
     userId: result.user?.id,
     userName: result.user?.name,
@@ -34,7 +35,30 @@ export const register = asyncHandler(async (req, res) => {
     entityId: result.user?.id,
     ip: req.ip,
   });
-  return created(res, result.user, "Registration successful. Please sign in.");
+
+  // Email an unverified-code check before the account can be used. The
+  // {{otp_code}} placeholder is replaced by otp.service once the code is minted.
+  const verification = buildVerificationEmail({
+    name: result.user?.name,
+    code: "{{otp_code}}",
+    expiresInMinutes: 10,
+    verifyUrl: `${env.frontendUrl}/verify-email`,
+  });
+  await createAndSendOtp({
+    email: result.user.email,
+    purpose: "email_verify",
+    subject: verification.subject,
+    html: verification.html,
+  });
+
+  // No session cookie is issued: the new account is unverified and must prove
+  // the inbox before first sign-in (see loginUser gate). The OTP ships only in
+  // the email — it is never echoed back to the client.
+  return created(
+    res,
+    { user: result.user },
+    "Registration successful. Check your email for the verification code.",
+  );
 });
 
 export const login = asyncHandler(async (req, res) => {
@@ -69,7 +93,7 @@ export const me = asyncHandler(async (req, res) => {
     return ok(res, publicUser, "Current user");
   }
   logger.info(
-    `[auth.me] session userId=${user._id} -> resolved id=${user._id} email=${user.email} role=${user.role}`,
+    `[auth.me] session userId=${user._id} email=${user.email} role=${user.role}`,
   );
   const publicUser = await toAuthUser(user);
   publicUser.profileCompletion = computeProfileCompletion(user);
@@ -126,6 +150,66 @@ export const resetPassword = asyncHandler(async (req, res) => {
   return ok(res, null, "Password updated. You can sign in with your new password.");
 });
 
+// POST /auth/verify-email — public (pre-login). Consumes the emailed code and
+// flips the account to verified. Reusing the OTP service keeps brute-force
+// protection (5 attempts, 10-min expiry, one-time consumption).
+export const verifyEmail = asyncHandler(async (req, res) => {
+  const email = req.body.email.toLowerCase();
+  await verifyOtp({ email, purpose: "email_verify", code: req.body.code });
+
+  const user = await User.findOne({ email }).collation({ locale: "en", strength: 2 });
+  if (!user) throw ApiError.badRequest("No account found for this email");
+
+  let justVerified = false;
+  if (user.emailVerified !== true) {
+    user.emailVerified = true;
+    user.emailVerifiedAt = new Date();
+    user.active = true;
+    await user.save();
+    justVerified = true;
+    recordAudit({
+      userId: user._id,
+      userName: user.name,
+      action: "Email address verified",
+      entityType: "user",
+      entityId: user._id,
+      ip: req.ip,
+    });
+  }
+  return ok(
+    res,
+    { emailVerified: true, emailVerifiedAt: user.emailVerifiedAt, justVerified },
+    justVerified ? "Email verified. You can now sign in." : "This email is already verified.",
+  );
+});
+
+// POST /auth/resend-verification — public (pre-login). Always answers with the
+// same message whether or not an account exists, so the endpoint cannot be used
+// to enumerate which emails are registered.
+export const resendVerification = asyncHandler(async (req, res) => {
+  const email = req.body.email.toLowerCase();
+  const user = await User.findOne({ email })
+    .collation({ locale: "en", strength: 2 })
+    .select("_id name active emailVerified")
+    .lean();
+
+  if (user?.active && user.emailVerified === false) {
+    const verification = buildVerificationEmail({
+      name: user.name,
+      code: "{{otp_code}}",
+      expiresInMinutes: 10,
+      verifyUrl: `${env.frontendUrl}/verify-email`,
+    });
+    await createAndSendOtp({
+      email,
+      purpose: "email_verify",
+      subject: verification.subject,
+      html: verification.html,
+    });
+  }
+  return ok(res, null, "If that email needs verification, a new code is on its way.");
+});
+
 // PUT /auth/profile — convenience alias for PUT /users/me/profile so the
 // frontend auth service does not need to know about the /users prefix.
 export { updateMyProfile } from "./user.controller.js";
@@ -145,8 +229,29 @@ function googleResultRedirect({ error } = {}) {
 }
 
 // GET /auth/google — kicks off the consent redirect with a CSRF state cookie.
+// The state value is opaque but HMAC-signed so a forged cookie (e.g. via a
+// subdomain cookie setter) can never produce a matching signature.
+function signGoogleState(value) {
+  return `${value}.${crypto
+    .createHmac("sha256", env.jwtSecret)
+    .update(value)
+    .digest("hex")}`;
+}
+
+function verifyGoogleState(state) {
+  if (typeof state !== "string") return null;
+  const lastDot = state.lastIndexOf(".");
+  if (lastDot <= 0) return null;
+  const value = state.slice(0, lastDot);
+  const sig = state.slice(lastDot + 1);
+  const expected = crypto.createHmac("sha256", env.jwtSecret).update(value).digest("hex");
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b) ? value : null;
+}
+
 export const googleStart = asyncHandler(async (req, res) => {
-  const state = crypto.randomBytes(16).toString("hex");
+  const state = signGoogleState(crypto.randomBytes(16).toString("hex"));
   res.cookie(OAUTH_STATE_COOKIE, state, {
     httpOnly: true,
     sameSite: env.cookie.sameSite,
@@ -161,10 +266,11 @@ export const googleStart = asyncHandler(async (req, res) => {
 // with the session token. Every failure lands back on /auth/callback without a
 // token so the frontend shows its standard retry message.
 export const googleCallback = asyncHandler(async (req, res) => {
-  const expectedState = req.cookies?.[OAUTH_STATE_COOKIE];
+  const expectedState = verifyGoogleState(req.cookies?.[OAUTH_STATE_COOKIE]);
+  const suppliedState = verifyGoogleState(req.query.state);
   res.clearCookie(OAUTH_STATE_COOKIE);
 
-  if (!expectedState || !req.query.state || req.query.state !== expectedState) {
+  if (!expectedState || !suppliedState || suppliedState !== expectedState) {
     return res.redirect(googleResultRedirect({ error: "google_state_mismatch" }));
   }
 
