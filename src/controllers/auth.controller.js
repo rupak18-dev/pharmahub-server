@@ -27,7 +27,6 @@ import { User } from "../models/User.js";
 
 export const register = asyncHandler(async (req, res) => {
   const result = await registerUser(req.body);
-  setSessionCookie(res, result.token, { remember: true });
   recordAudit({
     userId: result.user?.id,
     userName: result.user?.name,
@@ -230,8 +229,29 @@ function googleResultRedirect({ error } = {}) {
 }
 
 // GET /auth/google — kicks off the consent redirect with a CSRF state cookie.
+// The state value is opaque but HMAC-signed so a forged cookie (e.g. via a
+// subdomain cookie setter) can never produce a matching signature.
+function signGoogleState(value) {
+  return `${value}.${crypto
+    .createHmac("sha256", env.jwtSecret)
+    .update(value)
+    .digest("hex")}`;
+}
+
+function verifyGoogleState(state) {
+  if (typeof state !== "string") return null;
+  const lastDot = state.lastIndexOf(".");
+  if (lastDot <= 0) return null;
+  const value = state.slice(0, lastDot);
+  const sig = state.slice(lastDot + 1);
+  const expected = crypto.createHmac("sha256", env.jwtSecret).update(value).digest("hex");
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b) ? value : null;
+}
+
 export const googleStart = asyncHandler(async (req, res) => {
-  const state = crypto.randomBytes(16).toString("hex");
+  const state = signGoogleState(crypto.randomBytes(16).toString("hex"));
   res.cookie(OAUTH_STATE_COOKIE, state, {
     httpOnly: true,
     sameSite: env.cookie.sameSite,
@@ -246,10 +266,11 @@ export const googleStart = asyncHandler(async (req, res) => {
 // with the session token. Every failure lands back on /auth/callback without a
 // token so the frontend shows its standard retry message.
 export const googleCallback = asyncHandler(async (req, res) => {
-  const expectedState = req.cookies?.[OAUTH_STATE_COOKIE];
+  const expectedState = verifyGoogleState(req.cookies?.[OAUTH_STATE_COOKIE]);
+  const suppliedState = verifyGoogleState(req.query.state);
   res.clearCookie(OAUTH_STATE_COOKIE);
 
-  if (!expectedState || !req.query.state || req.query.state !== expectedState) {
+  if (!expectedState || !suppliedState || suppliedState !== expectedState) {
     return res.redirect(googleResultRedirect({ error: "google_state_mismatch" }));
   }
 

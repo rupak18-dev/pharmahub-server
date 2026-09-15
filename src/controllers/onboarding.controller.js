@@ -28,7 +28,16 @@ export const save = asyncHandler(async (req, res) => {
   if (req.body.onboarded) {
     const update = { onboarded: true };
     const jobTitle = personal?.jobTitle?.trim();
-    if (jobTitle) {
+
+    // Privilege guard: role adoption via the wizard is only allowed for an
+    // establishing account — still role-less (self-registered or Google) with
+    // no inviter/creator, first-completing onboarding. Staff who were invited
+    // or assigned a role by the Owner must keep the role the Owner gave them;
+    // re-running the wizard must never overwrite it (this was the vector for
+    // Owner privilege escalation).
+    const hasAssignedRole = Boolean(req.user.role && req.user.role.trim() !== "");
+    const wasInvited = Boolean(req.user.invitedBy || req.user.createdBy);
+    if (!hasAssignedRole && !wasInvited && jobTitle) {
       const roleDoc = await Role.findOne({ name: jobTitle }).select("_id").lean();
       update.role = jobTitle;
       update.roleId = roleDoc ? roleDoc._id : null;

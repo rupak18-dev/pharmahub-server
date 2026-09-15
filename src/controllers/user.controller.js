@@ -359,6 +359,11 @@ export const removeAvatar = asyncHandler(async (req, res) => {
 });
 
 export const createUser = asyncHandler(async (req, res) => {
+  // Privilege-escalation guard: only an Owner may create Owner accounts —
+  // mirrors the same constraint enforced on role changes in updateUser.
+  if (req.body.role === "Owner" && req.user?.role !== "Owner") {
+    throw ApiError.forbidden("Only the Owner can create Owner accounts");
+  }
   await assertRoleExists(req.body.role);
   const existing = await User.findOne({ email: req.body.email.toLowerCase() }).collation({
     locale: "en",
