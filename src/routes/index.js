@@ -18,6 +18,7 @@ import notificationRoutes from "./notification.routes.js";
 import reportRoutes from "./report.routes.js";
 import dashboardRoutes from "./dashboard.routes.js";
 import integrationRoutes from "./integration.routes.js";
+import ticketRoutes from "./ticket.routes.js";
 
 const router = Router();
 
@@ -44,5 +45,6 @@ router.use("/notifications", notificationRoutes);
 router.use("/reports", reportRoutes);
 router.use("/dashboard", dashboardRoutes);
 router.use("/integrations", integrationRoutes);
+router.use("/tickets", ticketRoutes);
 
 export default router;

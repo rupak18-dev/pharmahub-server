@@ -46,6 +46,8 @@ export const authOptional = asyncHandler(async (req, _res, next) => {
   next();
 });
 
+export const optionalAuth = authOptional;
+
 function bearerToken(req) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith("Bearer ")) return null;
