@@ -16,6 +16,11 @@ export function createApp() {
   const app = express();
 
   app.disable("x-powered-by");
+  // Behind Render's reverse proxy, trust the first hop so req.ip / rate
+  // limiting see the real client instead of the proxy's address.
+  if (env.isProduction) {
+    app.set("trust proxy", 1);
+  }
   app.use(cookieParser());
   app.use(
     helmet({
@@ -49,7 +54,7 @@ export function createApp() {
       credentials: true,
     }),
   );
-  app.use(express.json({ limit: "2mb" }));
+  app.use(express.json({ limit: "15mb" }));
   app.use(express.urlencoded({ extended: true }));
 
   // CSRF protection for cookie-authenticated mutations:

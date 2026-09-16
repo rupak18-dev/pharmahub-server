@@ -8,6 +8,7 @@ export const validate = (schema) => (req, _res, next) => {
         field: i.path.join("."),
         message: i.message,
       }));
+      console.error(`[Validation Error 422] ${req.method} ${req.originalUrl}:`, details, "Body:", req.body);
       return next(ApiError.unprocessable("Validation failed", details));
     }
     req.body = result.data;
