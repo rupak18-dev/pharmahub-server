@@ -8,8 +8,6 @@ import {
   REPORT_BILL_PURCHASE_TYPES,
 } from "../models/ReportBill.js";
 
-import { Category } from "../models/Category.js";
-import { Supplier } from "../models/Supplier.js";
 import { AuditLog } from "../models/AuditLog.js";
 import { SavedReport } from "../models/SavedReport.js";
 import { ScheduledReport } from "../models/ScheduledReport.js";

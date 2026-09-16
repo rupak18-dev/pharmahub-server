@@ -154,7 +154,6 @@ export const listUsers = asyncHandler(async (req, res) => {
 
   const callerId = req.user._id;
   const inviterId = req.user.invitedBy || req.user.createdBy;
-  const orgName = req.user.orgName?.trim();
 
   // Tenant/team scoping:
   // Admin/Owner sees themselves and users they invited/created.
@@ -1360,7 +1359,6 @@ export const getInvitationLink = asyncHandler(async (req, res) => {
 export const listInvitations = asyncHandler(async (req, res) => {
   const callerId = req.user._id;
   const inviterId = req.user.invitedBy || req.user.createdBy;
-  const orgName = req.user.orgName?.trim();
 
   const scopeConditions = [{ invitedBy: callerId }];
 
