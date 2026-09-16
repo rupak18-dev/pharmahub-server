@@ -197,3 +197,13 @@ export const retryReportBillWhatsApp = asyncHandler(async (req, res) => {
         : "WhatsApp delivery skipped";
   return ok(res, { ...bill, whatsapp: delivery }, message);
 });
+
+export const seedDemoBills = asyncHandler(async (req, res) => {
+  const data = await reportDataService.seedDemoReportBills({
+    userId: req.user?._id,
+    userName: req.user?.name,
+    orgName: req.user?.orgName,
+  });
+  return created(res, data, "Demo bills and reports data generated successfully");
+});
+

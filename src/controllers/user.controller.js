@@ -171,12 +171,6 @@ export const listUsers = asyncHandler(async (req, res) => {
     scopeConditions.push({ createdBy: inviterId });
   }
 
-  if (orgName && orgName.toLowerCase() !== "pharmahub") {
-    scopeConditions.push({
-      orgName: new RegExp(`^${orgName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
-    });
-  }
-
   // Seed demo emails to exclude from live users list unless the caller is that demo account
   const demoEmails = [
     "demo@pharmahub.local",
@@ -1372,12 +1366,6 @@ export const listInvitations = asyncHandler(async (req, res) => {
 
   if (inviterId) {
     scopeConditions.push({ invitedBy: inviterId });
-  }
-
-  if (orgName && orgName.toLowerCase() !== "pharmahub") {
-    scopeConditions.push({
-      orgName: new RegExp(`^${orgName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
-    });
   }
 
   const filter = {
