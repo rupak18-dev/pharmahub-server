@@ -2708,3 +2708,409 @@ export async function getReportBillsSummary(userId) {
     totalValue: round2(total.value),
   };
 }
+
+export async function seedDemoReportBills({ userId, userName = "Staff", orgName = "" }) {
+  const existingMeds = await Medicine.find().limit(10).lean();
+  const existingSups = await Supplier.find().limit(5).lean();
+
+  const medPool = existingMeds.length > 0 ? existingMeds : [
+    { name: "Paracetamol 500mg", hsnCode: "3004", ptr: 15.5, gstRate: 12 },
+    { name: "Amoxicillin 250mg", hsnCode: "3004", ptr: 45.0, gstRate: 12 },
+    { name: "Azithromycin 500mg", hsnCode: "3004", ptr: 82.0, gstRate: 12 },
+    { name: "Atorvastatin 10mg", hsnCode: "3004", ptr: 32.5, gstRate: 12 },
+    { name: "Metformin 500mg", hsnCode: "3004", ptr: 18.0, gstRate: 12 },
+    { name: "Vitamin D3 60K IU", hsnCode: "3004", ptr: 78.0, gstRate: 12 },
+    { name: "Ibuprofen 400mg", hsnCode: "3004", ptr: 12.0, gstRate: 12 },
+  ];
+
+  const supPool = existingSups.length > 0 ? existingSups : [
+    { name: "MedSupply Co.", gstNumber: "27ABCDE1234F1Z5" },
+    { name: "HealthDist Ltd.", gstNumber: "29PQRST9876G2Z9" },
+    { name: "CureWell Distributors", gstNumber: "24GHIJK5678H3X4" },
+  ];
+
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const userSuffix = String(userId).slice(-4).toUpperCase();
+
+  const salesTemplates = [
+    {
+      invNo: `INV-${userSuffix}-001`,
+      daysAgo: 0,
+      customer: "Ramesh Kumar",
+      phone: "9876543210",
+      mode: "UPI",
+      status: "paid",
+      items: [
+        { med: medPool[0], qty: 2, price: 20, disc: 0 },
+        { med: medPool[1], qty: 1, price: 60, disc: 5 },
+      ],
+    },
+    {
+      invNo: `INV-${userSuffix}-002`,
+      daysAgo: 1,
+      customer: "Priya Sharma",
+      phone: "9123456789",
+      mode: "Cash",
+      status: "paid",
+      items: [
+        { med: medPool[2], qty: 2, price: 110, disc: 10 },
+        { med: medPool[5], qty: 1, price: 95, disc: 0 },
+      ],
+    },
+    {
+      invNo: `INV-${userSuffix}-003`,
+      daysAgo: 3,
+      customer: "Ananya Reddy",
+      phone: "9988776655",
+      mode: "Card",
+      status: "paid",
+      items: [
+        { med: medPool[3], qty: 3, price: 45, disc: 5 },
+        { med: medPool[4], qty: 2, price: 25, disc: 0 },
+      ],
+    },
+    {
+      invNo: `INV-${userSuffix}-004`,
+      daysAgo: 7,
+      customer: "Suresh Patel",
+      phone: "9848022338",
+      mode: "Credit",
+      status: "pending",
+      items: [
+        { med: medPool[0], qty: 5, price: 20, disc: 5 },
+        { med: medPool[6], qty: 3, price: 18, disc: 0 },
+      ],
+    },
+    {
+      invNo: `INV-${userSuffix}-005`,
+      daysAgo: 12,
+      customer: "Dr. Rajesh Gupta",
+      phone: "9701234567",
+      mode: "UPI",
+      status: "paid",
+      items: [
+        { med: medPool[1], qty: 4, price: 60, disc: 10 },
+        { med: medPool[2], qty: 2, price: 110, disc: 5 },
+        { med: medPool[5], qty: 2, price: 95, disc: 5 },
+      ],
+    },
+    {
+      invNo: `INV-${userSuffix}-006`,
+      daysAgo: 20,
+      customer: "Kavita Verma",
+      phone: "9618012345",
+      mode: "Cash",
+      status: "paid",
+      items: [
+        { med: medPool[4], qty: 3, price: 25, disc: 0 },
+        { med: medPool[0], qty: 2, price: 20, disc: 0 },
+      ],
+    },
+    {
+      invNo: `INV-${userSuffix}-007`,
+      daysAgo: 32,
+      customer: "Vikram Singh",
+      phone: "9440112233",
+      mode: "UPI",
+      status: "paid",
+      items: [
+        { med: medPool[3], qty: 4, price: 45, disc: 5 },
+        { med: medPool[1], qty: 2, price: 60, disc: 0 },
+      ],
+    },
+    {
+      invNo: `INV-${userSuffix}-008`,
+      daysAgo: 45,
+      customer: "Walk-in Customer",
+      phone: "",
+      mode: "Cash",
+      status: "paid",
+      items: [
+        { med: medPool[6], qty: 2, price: 18, disc: 0 },
+        { med: medPool[0], qty: 1, price: 20, disc: 0 },
+      ],
+    },
+  ];
+
+  const purchaseTemplates = [
+    {
+      orderNo: `PUR-${userSuffix}-101`,
+      daysAgo: 2,
+      sup: supPool[0],
+      mode: "Bank Transfer",
+      status: "received",
+      items: [
+        { med: medPool[0], qty: 50, cost: 12, mrp: 20, gst: 12, batch: `CR-${userSuffix}-01` },
+        { med: medPool[1], qty: 30, cost: 35, mrp: 60, gst: 12, batch: `NV-${userSuffix}-01` },
+      ],
+    },
+    {
+      orderNo: `PUR-${userSuffix}-102`,
+      daysAgo: 8,
+      sup: supPool[1],
+      mode: "Credit",
+      status: "received",
+      items: [
+        { med: medPool[2], qty: 25, cost: 65, mrp: 110, gst: 12, batch: `AZ-${userSuffix}-01` },
+        { med: medPool[3], qty: 40, cost: 24, mrp: 45, gst: 12, batch: `AT-${userSuffix}-01` },
+      ],
+    },
+    {
+      orderNo: `PUR-${userSuffix}-103`,
+      daysAgo: 18,
+      sup: supPool[2],
+      mode: "Bank Transfer",
+      status: "received",
+      items: [
+        { med: medPool[4], qty: 60, cost: 14, mrp: 25, gst: 12, batch: `GL-${userSuffix}-01` },
+        { med: medPool[5], qty: 35, cost: 60, mrp: 95, gst: 12, batch: `VD-${userSuffix}-01` },
+      ],
+    },
+    {
+      orderNo: `PUR-${userSuffix}-104`,
+      daysAgo: 35,
+      sup: supPool[0],
+      mode: "Credit",
+      status: "received",
+      items: [
+        { med: medPool[6], qty: 45, cost: 9, mrp: 18, gst: 12, batch: `BR-${userSuffix}-01` },
+        { med: medPool[0], qty: 80, cost: 12, mrp: 20, gst: 12, batch: `CR-${userSuffix}-02` },
+      ],
+    },
+    {
+      orderNo: `PUR-${userSuffix}-105`,
+      daysAgo: 52,
+      sup: supPool[1],
+      mode: "Bank Transfer",
+      status: "received",
+      items: [
+        { med: medPool[1], qty: 40, cost: 35, mrp: 60, gst: 12, batch: `NV-${userSuffix}-02` },
+        { med: medPool[2], qty: 20, cost: 65, mrp: 110, gst: 12, batch: `AZ-${userSuffix}-02` },
+      ],
+    },
+  ];
+
+  let salesAdded = 0;
+  for (const t of salesTemplates) {
+    const invoiceDate = new Date(now - t.daysAgo * dayMs);
+    const existing = await ReportBill.findOne({
+      createdBy: userId,
+      "invoice.invoiceNumber": t.invNo,
+    });
+    if (existing) continue;
+
+    const lineItems = t.items.map((i, idx) => {
+      const gross = i.qty * i.price;
+      const disc = (gross * (i.disc || 0)) / 100;
+      const taxable = gross - disc;
+      const gstRate = i.med.gstRate || 12;
+      const halfRate = gstRate / 2;
+      const gstAmt = (taxable * gstRate) / 100;
+      const halfAmt = gstAmt / 2;
+      return {
+        medicineId: i.med._id ?? null,
+        medicineName: i.med.name,
+        quantity: i.qty,
+        unitPrice: i.price,
+        discountPct: i.disc || 0,
+        discountAmount: round2(disc),
+        gstRate,
+        sgstRate: halfRate,
+        cgstRate: halfRate,
+        sgstAmount: round2(halfAmt),
+        cgstAmount: round2(halfAmt),
+        gstAmount: round2(gstAmt),
+        taxableAmount: round2(taxable),
+        lineTotal: round2(taxable + gstAmt),
+        hsnCode: i.med.hsnCode || "3004",
+        batchNumber: `B26-0${idx + 1}`,
+      };
+    });
+
+    const subtotal = lineItems.reduce((acc, it) => acc + (it.quantity * it.unitPrice), 0);
+    const discTotal = lineItems.reduce((acc, it) => acc + it.discountAmount, 0);
+    const taxableTotal = subtotal - discTotal;
+    const gstTotal = lineItems.reduce((acc, it) => acc + it.gstAmount, 0);
+    const grandTotal = round2(taxableTotal + gstTotal);
+
+    await ReportBill.create({
+      source: "manual",
+      documentType: "sales_invoice",
+      invoice: { invoiceNumber: t.invNo, invoiceDate },
+      customer: { name: t.customer, phone: t.phone },
+      items: lineItems,
+      totals: {
+        subtotal: round2(subtotal),
+        discountAmount: round2(discTotal),
+        taxableAmount: round2(taxableTotal),
+        sgst: round2(gstTotal / 2),
+        cgst: round2(gstTotal / 2),
+        totalGst: round2(gstTotal),
+        roundOff: round2(Math.round(grandTotal) - grandTotal),
+        grandTotal,
+        calculatedGrandTotal: grandTotal,
+      },
+      payment: { mode: t.mode, status: t.status },
+      status: "completed",
+      orgName: String(orgName ?? "").trim(),
+      createdBy: userId,
+      createdByName: userName,
+      createdAt: invoiceDate,
+    });
+
+    // Also populate Sale record
+    await Sale.create({
+      invoiceNo: t.invNo,
+      customerName: t.customer,
+      customerPhone: t.phone,
+      items: lineItems.map((it) => ({
+        medicineId: it.medicineId,
+        medicineName: it.medicineName,
+        quantity: it.quantity,
+        unitPrice: it.unitPrice,
+        discountPct: it.discountPct,
+        gstRate: it.gstRate,
+        taxableAmount: it.taxableAmount,
+        gstAmount: it.gstAmount,
+        lineTotal: it.lineTotal,
+        batchNumber: it.batchNumber,
+      })),
+      subtotal: round2(subtotal),
+      discountTotal: round2(discTotal),
+      taxableAmount: round2(taxableTotal),
+      gstTotal: round2(gstTotal),
+      grandTotal,
+      paymentMode: t.mode,
+      paymentStatus: t.status,
+      source: "manual",
+      status: "completed",
+      createdBy: userId,
+      createdByName: userName,
+      createdAt: invoiceDate,
+    });
+    salesAdded += 1;
+  }
+
+  let purchasesAdded = 0;
+  for (const t of purchaseTemplates) {
+    const invoiceDate = new Date(now - t.daysAgo * dayMs);
+    const existing = await ReportBill.findOne({
+      createdBy: userId,
+      "invoice.invoiceNumber": t.orderNo,
+    });
+    if (existing) continue;
+
+    const lineItems = t.items.map((i) => {
+      const gross = i.qty * i.cost;
+      const gstRate = i.gst || 12;
+      const halfRate = gstRate / 2;
+      const gstAmt = (gross * gstRate) / 100;
+      const halfAmt = gstAmt / 2;
+      return {
+        medicineId: i.med._id ?? null,
+        medicineName: i.med.name,
+        quantity: i.qty,
+        unitCost: i.cost,
+        mrp: i.mrp,
+        discountPct: 0,
+        discountAmount: 0,
+        gstRate,
+        sgstRate: halfRate,
+        cgstRate: halfRate,
+        sgstAmount: round2(halfAmt),
+        cgstAmount: round2(halfAmt),
+        gstAmount: round2(gstAmt),
+        taxableAmount: round2(gross),
+        lineTotal: round2(gross + gstAmt),
+        hsnCode: i.med.hsnCode || "3004",
+        pack: "10 Tabs",
+        batchNumber: i.batch,
+        expiryDate: new Date(now + 365 * dayMs),
+        manufacturer: "Cipla",
+      };
+    });
+
+    const subtotal = lineItems.reduce((acc, it) => acc + (it.quantity * it.unitCost), 0);
+    const gstTotal = lineItems.reduce((acc, it) => acc + it.gstAmount, 0);
+    const grandTotal = round2(subtotal + gstTotal);
+
+    await ReportBill.create({
+      source: "manual",
+      documentType: "purchase_invoice",
+      invoice: { invoiceNumber: t.orderNo, invoiceDate },
+      supplier: {
+        name: t.sup.name,
+        gstin: t.sup.gstNumber || "",
+        address: "Industrial Area, Phase II",
+        phone: "+919876543210",
+      },
+      items: lineItems,
+      totals: {
+        subtotal: round2(subtotal),
+        discountAmount: 0,
+        taxableAmount: round2(subtotal),
+        sgst: round2(gstTotal / 2),
+        cgst: round2(gstTotal / 2),
+        totalGst: round2(gstTotal),
+        roundOff: round2(Math.round(grandTotal) - grandTotal),
+        grandTotal,
+        calculatedGrandTotal: grandTotal,
+      },
+      payment: { mode: t.mode, status: "paid" },
+      status: "received",
+      orgName: String(orgName ?? "").trim(),
+      createdBy: userId,
+      createdByName: userName,
+      createdAt: invoiceDate,
+    });
+
+    // Also populate Purchase record
+    await Purchase.create({
+      orderNo: t.orderNo,
+      supplierId: t.sup._id ?? null,
+      supplierName: t.sup.name,
+      party: { name: t.sup.name, gstin: t.sup.gstNumber || "" },
+      items: lineItems.map((it) => ({
+        medicineId: it.medicineId,
+        medicineName: it.medicineName,
+        quantity: it.quantity,
+        unitCost: it.unitCost,
+        mrp: it.mrp,
+        gstRate: it.gstRate,
+        sgstRate: it.sgstRate,
+        cgstRate: it.cgstRate,
+        sgstAmount: it.sgstAmount,
+        cgstAmount: it.cgstAmount,
+        gstAmount: it.gstAmount,
+        taxableAmount: it.taxableAmount,
+        lineTotal: it.lineTotal,
+        hsnCode: it.hsnCode,
+        batchNumber: it.batchNumber,
+        expiryDate: it.expiryDate,
+        manufacturer: it.manufacturer,
+      })),
+      subtotal: round2(subtotal),
+      discount: 0,
+      taxableAmount: round2(subtotal),
+      totalSGST: round2(gstTotal / 2),
+      totalCGST: round2(gstTotal / 2),
+      gstTotal: round2(gstTotal),
+      grandTotal,
+      documentType: "purchase_invoice",
+      status: "received",
+      source: "manual",
+      createdBy: userId,
+      createdByName: userName,
+      createdAt: invoiceDate,
+    });
+    purchasesAdded += 1;
+  }
+
+  return {
+    salesAdded,
+    purchasesAdded,
+    total: salesAdded + purchasesAdded,
+  };
+}
+

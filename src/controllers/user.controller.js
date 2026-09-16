@@ -154,7 +154,6 @@ export const listUsers = asyncHandler(async (req, res) => {
 
   const callerId = req.user._id;
   const inviterId = req.user.invitedBy || req.user.createdBy;
-  const orgName = req.user.orgName?.trim();
 
   // Tenant/team scoping:
   // Admin/Owner sees themselves and users they invited/created.
@@ -169,12 +168,6 @@ export const listUsers = asyncHandler(async (req, res) => {
     scopeConditions.push({ _id: inviterId });
     scopeConditions.push({ invitedBy: inviterId });
     scopeConditions.push({ createdBy: inviterId });
-  }
-
-  if (orgName && orgName.toLowerCase() !== "pharmahub") {
-    scopeConditions.push({
-      orgName: new RegExp(`^${orgName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
-    });
   }
 
   // Seed demo emails to exclude from live users list unless the caller is that demo account
@@ -1382,18 +1375,11 @@ export const getInvitationLink = asyncHandler(async (req, res) => {
 export const listInvitations = asyncHandler(async (req, res) => {
   const callerId = req.user._id;
   const inviterId = req.user.invitedBy || req.user.createdBy;
-  const orgName = req.user.orgName?.trim();
 
   const scopeConditions = [{ invitedBy: callerId }];
 
   if (inviterId) {
     scopeConditions.push({ invitedBy: inviterId });
-  }
-
-  if (orgName && orgName.toLowerCase() !== "pharmahub") {
-    scopeConditions.push({
-      orgName: new RegExp(`^${orgName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
-    });
   }
 
   const filter = {

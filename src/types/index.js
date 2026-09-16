@@ -113,6 +113,34 @@ const phoneSchema = z
 // non-Indian formats from blocking unrelated field updates.
 const updatePhoneSchema = z.string().trim().max(20, "Phone number is too long").optional();
 
+const profileUpdateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    role: z.enum(["Owner", "Admin", "Pharmacist", "Cashier", "Store Keeper", "Inventory Manager"]).optional(),
+    email: emailSchema.optional(),
+    phone: phoneSchema.or(z.literal("")).optional().nullable(),
+    avatarUrl: z.string().trim().optional().or(z.literal("")).nullable(),
+    logoUrl: z.string().trim().optional().or(z.literal("")).nullable(),
+    orgName: z.string().trim().max(120).optional().or(z.literal("")).nullable(),
+    tagline: z.string().trim().max(200).optional().or(z.literal("")).nullable(),
+    description: z.string().trim().max(2000).optional().or(z.literal("")).nullable(),
+    businessEmail: z.string().trim().email("Invalid email").max(160).optional().or(z.literal("")).nullable(),
+    website: z.string().trim().max(200).optional().or(z.literal("")).nullable(),
+    address: z.string().trim().max(500).optional().or(z.literal("")).nullable(),
+    city: z.string().trim().max(100).optional().or(z.literal("")).nullable(),
+    state: z.string().trim().max(100).optional().or(z.literal("")).nullable(),
+    pincode: z.string().trim().max(20).optional().or(z.literal("")).nullable(),
+    gstin: z.string().trim().max(30).optional().or(z.literal("")).nullable(),
+    licenseNo: z.string().trim().max(50).optional().or(z.literal("")).nullable(),
+    businessType: z.string().trim().max(100).optional().or(z.literal("")).nullable(),
+    services: z.string().trim().max(1000).optional().or(z.literal("")).nullable(),
+    businessHours: z.string().trim().max(500).optional().or(z.literal("")).nullable(),
+    metaPixelId: z.string().trim().max(200).optional().or(z.literal("")).nullable(),
+    branches: z.array(z.string().trim().max(200)).max(20).optional(),
+    onboarded: z.boolean().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, "At least one field is required");
+
 export const authSchemas = {
   register: z.object({
     name: z.string().trim().min(1, "Name is required").max(120),
@@ -197,32 +225,7 @@ export const userSchemas = {
     password: passwordSchema,
     phone: phoneSchema,
   }),
-  updateProfile: z
-    .object({
-      name: z.string().trim().min(1).max(120).optional(),
-      email: emailSchema.optional(),
-      phone: phoneSchema.or(z.literal("")).optional().nullable(),
-      avatarUrl: z.string().trim().optional().or(z.literal("")).nullable(),
-      logoUrl: z.string().trim().optional().or(z.literal("")).nullable(),
-      orgName: z.string().trim().max(120).optional().or(z.literal("")).nullable(),
-      tagline: z.string().trim().max(200).optional().or(z.literal("")).nullable(),
-      description: z.string().trim().max(2000).optional().or(z.literal("")).nullable(),
-      businessEmail: z.string().trim().email("Invalid email").max(160).optional().or(z.literal("")).nullable(),
-      website: z.string().trim().max(200).optional().or(z.literal("")).nullable(),
-      address: z.string().trim().max(500).optional().or(z.literal("")).nullable(),
-      city: z.string().trim().max(100).optional().or(z.literal("")).nullable(),
-      state: z.string().trim().max(100).optional().or(z.literal("")).nullable(),
-      pincode: z.string().trim().max(20).optional().or(z.literal("")).nullable(),
-      gstin: z.string().trim().max(30).optional().or(z.literal("")).nullable(),
-      licenseNo: z.string().trim().max(50).optional().or(z.literal("")).nullable(),
-      businessType: z.string().trim().max(100).optional().or(z.literal("")).nullable(),
-      services: z.string().trim().max(1000).optional().or(z.literal("")).nullable(),
-      businessHours: z.string().trim().max(500).optional().or(z.literal("")).nullable(),
-      metaPixelId: z.string().trim().max(200).optional().or(z.literal("")).nullable(),
-      branches: z.array(z.string().trim().max(200)).max(20).optional(),
-      onboarded: z.boolean().optional(),
-    })
-    .refine((v) => Object.keys(v).length > 0, "At least one field is required"),
+  updateProfile: profileUpdateSchema,
 };
 
 const medicineCreateSchema = z.object({
