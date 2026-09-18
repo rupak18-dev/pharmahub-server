@@ -16,15 +16,13 @@ async function bootstrap() {
       );
     }
 
-    await connectDB();
-    await Role.ensureSystemRoles();
-
-    await validateEmailConfig();
-
     const app = createApp();
     const server = app.listen(env.port, () => {
       logger.info(`PharmaHub API running at http://localhost:${env.port} (${env.nodeEnv})`);
     });
+
+    server.keepAliveTimeout = 65_000;
+    server.headersTimeout = 66_000;
 
     server.on("error", (err) => {
       if (err.code === "EADDRINUSE") {
@@ -34,12 +32,6 @@ async function bootstrap() {
       }
       process.exit(1);
     });
-
-    // Scheduled report background worker & WhatsApp session auto-restoration
-    if (!env.isTest) {
-      startScheduledReportWorker();
-      autoRestoreSessions();
-    }
 
     const shutdown = async (signal) => {
       logger.info(`${signal} received — shutting down gracefully`);
@@ -56,6 +48,17 @@ async function bootstrap() {
 
     process.on("SIGTERM", () => shutdown("SIGTERM"));
     process.on("SIGINT", () => shutdown("SIGINT"));
+
+    await connectDB();
+    await Role.ensureSystemRoles();
+
+    await validateEmailConfig();
+
+    // Scheduled report background worker & WhatsApp session auto-restoration
+    if (!env.isTest) {
+      startScheduledReportWorker();
+      autoRestoreSessions();
+    }
   } catch (err) {
     logger.error(
       "Failed to start server. Check the MongoDB configuration (MONGO_URI) in .env — the backend refuses to start without a valid database connection.",
