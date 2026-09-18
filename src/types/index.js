@@ -465,7 +465,7 @@ export const ticketSchemas = {
       title: z
         .string({ required_error: "Title is required" })
         .trim()
-        .min(3, "Title must be at least 3 characters")
+        .min(2, "Title must be at least 2 characters")
         .max(250, "Title cannot exceed 250 characters"),
       issueType: z
         .string({ required_error: "Issue type is required" })
