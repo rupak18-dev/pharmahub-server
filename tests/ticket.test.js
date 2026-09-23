@@ -224,11 +224,11 @@ describe(
       });
       assert.equal(res1.status, 422);
 
-      // Title too short (< 3 chars)
+      // Title too short (< 2 chars)
       const res2 = await request("/tickets", {
         method: "POST",
         body: {
-          title: "ab",
+          title: "a",
           issueType: "billing_pos",
           description: "This is a valid description",
           screenshot: "data:image/png;base64,sample",
