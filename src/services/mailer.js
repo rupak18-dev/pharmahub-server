@@ -208,7 +208,10 @@ export async function sendEmail({ to, subject, text, html, attachments } = {}) {
     if (env.isProduction) {
       throw new Error("Email is not configured — refusing to pretend email was sent.");
     }
-    logger.warn("SMTP not configured; email delivery skipped");
+    logger.error(
+      `Email delivery is NOT configured (missing SMTP_HOST/SMTP_USER/SMTP_PASSWORD or RESEND_API_KEY) — ` +
+        `message to ${recipient} was SKIPPED, not sent. The recipient will NOT receive this email.`,
+    );
     logger.info(`[MAIL DEBUG] sendResult=skipped (SMTP not configured) recipient=${recipient}`);
     return { skipped: true };
   }

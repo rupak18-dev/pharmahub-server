@@ -44,7 +44,7 @@ export const register = asyncHandler(async (req, res) => {
     expiresInMinutes: 10,
     verifyUrl: `${env.frontendUrl}/verify-email`,
   });
-  await createAndSendOtp({
+  const delivery = await createAndSendOtp({
     email: result.user.email,
     purpose: "email_verify",
     subject: verification.subject,
@@ -53,11 +53,14 @@ export const register = asyncHandler(async (req, res) => {
 
   // No session cookie is issued: the new account is unverified and must prove
   // the inbox before first sign-in (see loginUser gate). The OTP ships only in
-  // the email — it is never echoed back to the client.
+  // the email — it is never echoed back to the client... except the dev-only
+  // `devCode` surface when email delivery is NOT configured (nothing was sent).
   return created(
     res,
-    { user: result.user },
-    "Registration successful. Check your email for the verification code.",
+    { user: result.user, devCode: delivery?.devCode },
+    delivery?.skipped
+      ? "Registration successful, but email delivery is not configured — the verification code was not emailed."
+      : "Registration successful. Check your email for the verification code.",
   );
 });
 
@@ -193,6 +196,7 @@ export const resendVerification = asyncHandler(async (req, res) => {
     .select("_id name active emailVerified")
     .lean();
 
+  let devCode;
   if (user?.active && user.emailVerified === false) {
     const verification = buildVerificationEmail({
       name: user.name,
@@ -200,14 +204,22 @@ export const resendVerification = asyncHandler(async (req, res) => {
       expiresInMinutes: 10,
       verifyUrl: `${env.frontendUrl}/verify-email`,
     });
-    await createAndSendOtp({
+    const delivery = await createAndSendOtp({
       email,
       purpose: "email_verify",
       subject: verification.subject,
       html: verification.html,
     });
+    devCode = delivery?.devCode;
   }
-  return ok(res, null, "If that email needs verification, a new code is on its way.");
+  // Same response message whether or not the account exists — no account
+  // enumeration. The dev-only `devCode` (present only when delivery is skipped,
+  // i.e. nothing was emailed) does not reveal account existence on its own.
+  return ok(
+    res,
+    devCode ? { devCode } : null,
+    "If that email is registered and unverified, a new code is on its way.",
+  );
 });
 
 // PUT /auth/profile — convenience alias for PUT /users/me/profile so the
