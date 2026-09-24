@@ -78,7 +78,7 @@ export async function createAndSendOtp({ email, purpose, subject, html }) {
   const skipped = Boolean(sendResult?.skipped);
   const devCode =
     skipped && env.echoDevCode && !env.isProduction ? code : undefined;
-  return { skipped, devCode };
+  return { skipped, devCode, reason: sendResult?.reason ?? null };
 }
 
 /** Verifies a code for `email`/`purpose` and consumes it once successful. */

@@ -195,10 +195,17 @@ export async function sendEmail({ to, subject, text, html, attachments } = {}) {
       );
       return { skipped: false, messageId: data?.id };
     } catch (err) {
+      // A failed send must never 500 the caller (registration, verification,
+      // invitations, tickets...). Report it loudly and hand back `skipped` so
+      // callers answer with an honest "email not sent" response.
       logger.error(
         `[MAIL DEBUG] sendResult=failure (resend) recipient=${recipient} error=${err?.message ?? err}`,
       );
-      throw err;
+      logger.error(
+        `Email delivery FAILED to ${recipient} via Resend — treated as skipped, not sent. ` +
+          `Check RESEND_API_KEY / EMAIL_FROM (must be a verified Resend domain).`,
+      );
+      return { skipped: true, reason: "delivery_failed", error: err?.message ?? String(err) };
     }
   }
 
@@ -234,10 +241,18 @@ export async function sendEmail({ to, subject, text, html, attachments } = {}) {
     );
     return { skipped: false, messageId: info.messageId };
   } catch (err) {
+    // Same policy as above — SMTP send failures are logged loudly and convert
+    // to `skipped` so registration/verification/etc. never return 500 purely
+    // because the email provider refused the message.
     logger.error(
       `[MAIL DEBUG] sendResult=failure recipient=${recipient} error=${err?.message ?? err}`,
     );
-    throw err;
+    logger.error(
+      `Email delivery FAILED to ${recipient} via SMTP — treated as skipped, not sent. ` +
+        `Check SMTP credentials and host egress (Gmail often blocks cloud hosts on port 587; ` +
+        `consider RESEND_API_KEY).`,
+    );
+    return { skipped: true, reason: "delivery_failed", error: err?.message ?? String(err) };
   }
 }
 
