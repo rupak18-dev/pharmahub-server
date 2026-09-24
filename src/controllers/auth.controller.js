@@ -55,12 +55,14 @@ export const register = asyncHandler(async (req, res) => {
   // the inbox before first sign-in (see loginUser gate). The OTP ships only in
   // the email — it is never echoed back to the client... except the dev-only
   // `devCode` surface when email delivery is NOT configured (nothing was sent).
+  const skipMessage =
+    delivery?.reason === "delivery_failed"
+      ? "Registration successful, but the verification email failed to send. Check your email provider and try 'Resend code'."
+      : "Registration successful, but email delivery is not configured — the verification code was not emailed.";
   return created(
     res,
-    { user: result.user, devCode: delivery?.devCode },
-    delivery?.skipped
-      ? "Registration successful, but email delivery is not configured — the verification code was not emailed."
-      : "Registration successful. Check your email for the verification code.",
+    { user: result.user, devCode: delivery?.devCode, emailReason: delivery?.reason ?? null },
+    delivery?.skipped ? skipMessage : "Registration successful. Check your email for the verification code.",
   );
 });
 
