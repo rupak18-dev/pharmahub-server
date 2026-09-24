@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 import { ApiError } from "../core/ApiError.js";
+import { logger } from "../core/logger.js";
 import { Otp } from "../models/Otp.js";
 import { sendEmail } from "./email.service.js";
 
@@ -48,7 +49,7 @@ export async function createAndSendOtp({ email, purpose, subject, html }) {
     { upsert: true },
   );
 
-  await sendEmail({
+  const sendResult = await sendEmail({
     to: normalizedEmail,
     subject: subject ?? "Your PharmaHub verification code",
     html:
@@ -59,6 +60,21 @@ export async function createAndSendOtp({ email, purpose, subject, html }) {
 <p style="font-size:24px;font-weight:bold;letter-spacing:4px">${code}</p>
 <p>It expires in 10 minutes. If you didn't request this code, you can ignore this email.</p>`,
   });
+
+  // Never let a skipped/failed delivery masquerade as a sent code: surface it
+  // loudly so the API response / logs reflect that no email actually went out.
+  if (sendResult?.skipped) {
+    logger.error(
+      `[otp] Code stored for ${normalizedEmail} (${purpose}) but email delivery is not configured — ` +
+        "the code was NOT emailed to the recipient.",
+    );
+  }
+
+  // Frontend dev contract: when delivery is skipped (no SMTP/Resend), surface
+  // the code as `devCode` so dev flows still work. It is ONLY returned when the
+  // code was never emailed to anyone — never echoed once delivered.
+  const skipped = Boolean(sendResult?.skipped);
+  return { skipped, devCode: skipped ? code : undefined };
 }
 
 /** Verifies a code for `email`/`purpose` and consumes it once successful. */
