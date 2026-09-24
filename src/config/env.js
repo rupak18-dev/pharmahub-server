@@ -162,6 +162,12 @@ export const env = {
   // enabled in the environment; production always ignores them.
   enableDemoAccounts: process.env.ENABLE_DEMO_ACCOUNTS === "true",
 
+  // When email delivery is NOT configured (no SMTP/Resend), the OTP would
+  // otherwise be unretrievable. This opt-in surfaces the generated code as
+  // `devCode` in the register/resend response so local/demo UIs (which already
+  // render it) keep working. Never enabled in production. Off by default.
+  echoDevCode: process.env.EMAIL_DEV_CODE === "true",
+
   cookie: {
     name: "pharmahub_session",
 

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import { ApiError } from "../core/ApiError.js";
 import { logger } from "../core/logger.js";
+import { env } from "../config/env.js";
 import { Otp } from "../models/Otp.js";
 import { sendEmail } from "./email.service.js";
 
@@ -71,10 +72,13 @@ export async function createAndSendOtp({ email, purpose, subject, html }) {
   }
 
   // Frontend dev contract: when delivery is skipped (no SMTP/Resend), surface
-  // the code as `devCode` so dev flows still work. It is ONLY returned when the
-  // code was never emailed to anyone — never echoed once delivered.
+  // the code as `devCode` so dev flows still work — but ONLY with an explicit
+  // opt-in (EMAIL_DEV_CODE=true), outside production, and never once the code
+  // has actually been emailed to anyone.
   const skipped = Boolean(sendResult?.skipped);
-  return { skipped, devCode: skipped ? code : undefined };
+  const devCode =
+    skipped && env.echoDevCode && !env.isProduction ? code : undefined;
+  return { skipped, devCode };
 }
 
 /** Verifies a code for `email`/`purpose` and consumes it once successful. */
