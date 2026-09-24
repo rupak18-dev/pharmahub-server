@@ -205,15 +205,16 @@ export async function sendEmail({ to, subject, text, html, attachments } = {}) {
   // ── SMTP path ───────────────────────────────────────────────────────────────
   const transporter = getTransporter();
   if (!transporter) {
-    if (env.isProduction) {
-      throw new Error("Email is not configured — refusing to pretend email was sent.");
-    }
+    // No hard throw here — even in production a misconfigured/unavailable email
+    // provider must never turn registration, verification, invitations, tickets,
+    // etc. into 500s. Every caller already treats `{ skipped: true }` as a
+    // handled case and answers with an honest "email not sent" message.
     logger.error(
       `Email delivery is NOT configured (missing SMTP_HOST/SMTP_USER/SMTP_PASSWORD or RESEND_API_KEY) — ` +
         `message to ${recipient} was SKIPPED, not sent. The recipient will NOT receive this email.`,
     );
-    logger.info(`[MAIL DEBUG] sendResult=skipped (SMTP not configured) recipient=${recipient}`);
-    return { skipped: true };
+    logger.info(`[MAIL DEBUG] sendResult=skipped (no email provider configured) recipient=${recipient}`);
+    return { skipped: true, reason: "email_unconfigured" };
   }
   try {
     const fromAddress = env.smtp.from || env.smtp.user || "no-reply@pharmahub.local";
