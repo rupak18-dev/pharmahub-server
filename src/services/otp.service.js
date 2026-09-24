@@ -76,8 +76,9 @@ export async function createAndSendOtp({ email, purpose, subject, html }) {
   // opt-in (EMAIL_DEV_CODE=true), outside production, and never once the code
   // has actually been emailed to anyone.
   const skipped = Boolean(sendResult?.skipped);
-  const devCode =
-    skipped && env.echoDevCode && !env.isProduction ? code : undefined;
+  const echoAllowed =
+    env.echoDevCode && (!env.isProduction || env.echoDevCodeInProduction);
+  const devCode = skipped && echoAllowed ? code : undefined;
   return { skipped, devCode, reason: sendResult?.reason ?? null };
 }
 
