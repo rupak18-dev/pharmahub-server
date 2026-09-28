@@ -34,16 +34,19 @@ export const DEFAULT_ROLE_PERMISSIONS = {
   }),
   Cashier: rolePermissions((m) => {
     if (m === "sales") return { ...none(), view: true, create: true };
-    if (["dashboard", "medicines", "batches", "shortbook"].includes(m)) return view();
+    if (["dashboard", "medicines", "batches", "shortbook", "notifications"].includes(m))
+      return view();
     return none();
   }),
   "Store Keeper": rolePermissions((m) => {
     if (m === "batches") return { ...view(), create: true, update: true };
-    if (["dashboard", "medicines", "expiry", "audit", "shortbook"].includes(m)) return view();
+    if (m === "inventory") return { ...view(), create: true, update: true };
+    if (["dashboard", "medicines", "expiry", "audit", "shortbook", "notifications"].includes(m))
+      return view();
     return none();
   }),
   "Inventory Manager": rolePermissions((m) => {
-    if (["medicines", "batches", "expiry", "audit", "purchases"].includes(m))
+    if (["medicines", "batches", "expiry", "audit", "purchases", "inventory"].includes(m))
       return { ...all(), delete: m === "batches" };
     if (["dashboard", "reports"].includes(m)) return viewExport();
     return view();

@@ -406,11 +406,15 @@ export const updateUser = asyncHandler(async (req, res) => {
       accessIds,
     } = req.body;
 
-    if (role !== undefined) {
-      await assertRoleExists(role);
-      invitation.role = role;
-      invitation.roleId = (await resolveRoleId(role)) ?? null;
+  if (role !== undefined) {
+    if (role === "Owner" && req.user?.role !== "Owner") {
+      throw ApiError.forbidden("Only the Owner can assign the Owner role");
     }
+    await assertRoleExists(role);
+    invitation.role = role;
+    invitation.roleId = (await resolveRoleId(role)) ?? null;
+  }
+
     if (name !== undefined) invitation.name = name;
     if (phone !== undefined) invitation.phone = phone;
     if (department !== undefined) invitation.department = department;
@@ -909,6 +913,9 @@ export const inviteUser = asyncHandler(async (req, res) => {
     `[users.invite] POST /users/invite — by=${req.user.email} org=${req.user.orgName ?? "(none)"} target=${email ?? "(missing)"} role=${role ?? "(missing)"}`,
   );
   if (!email || !role) throw ApiError.badRequest("Email and role are required");
+  if (role === "Owner" && req.user?.role !== "Owner") {
+    throw ApiError.forbidden("Only the Owner can assign the Owner role");
+  }
   await assertRoleExists(role);
   logger.info(`[users.invite] role "${role}" verified`);
 

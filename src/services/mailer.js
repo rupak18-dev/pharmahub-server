@@ -3,7 +3,7 @@ import net from "node:net";
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
 
-import { env, isEmailConfigured } from "../config/env.js";
+import { env, isEmailConfigured, isResendConfigured } from "../config/env.js";
 import { logger } from "../core/logger.js";
 
 let transporterCache = null;
@@ -20,7 +20,7 @@ const SMTP_TIMEOUTS = {
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 
 function getResendClient() {
-  if (!env.email.apiKey) return null;
+  if (!isResendConfigured()) return null;
   if (!resendClient) {
     resendClient = new Resend(env.email.apiKey);
   }
@@ -29,7 +29,7 @@ function getResendClient() {
 
 function getTransporter() {
   // Resend is the preferred path when configured; SMTP is unused alongside it.
-  if (env.email.apiKey) {
+  if (isResendConfigured()) {
     transporterCache = null;
     return null;
   }
@@ -73,30 +73,152 @@ function probeTcp(host, port, timeoutMs = 5000) {
   });
 }
 
+/**
+ * Flattens whatever the Resend SDK hands back (an `Error`-like object in most
+ * versions, a thrown exception in others) into one log-safe line. The status
+ * code is what separates "bad key" from "unverified sender" — without it both
+ * surface as an opaque 400 and look identical in the logs.
+ */
+function describeResendError(error) {
+  if (!error) return "unknown error";
+  const parts = [error.message ?? String(error)];
+  if (error.name) parts.push(`name=${error.name}`);
+  const status = error.statusCode ?? error.status;
+  if (status) parts.push(`status=${status}`);
+  return parts.join(" ");
+}
+
+/** Maps a Resend failure to the one action that actually fixes it. */
+function resendErrorHint(error) {
+  const status = error?.statusCode ?? error?.status;
+  const message = (error?.message ?? "").toLowerCase();
+
+  if (status === 401 || message.includes("api key") || message.includes("unauthorized")) {
+    return "The API key is invalid, revoked, or expired — re-copy it from Resend → API Keys and redeploy.";
+  }
+  if (status === 403 || message.includes("not verified") || message.includes("domain")) {
+    return "The sender domain is not verified on this Resend account — verify its DNS records, or point EMAIL_FROM at a domain that is.";
+  }
+  if (status === 429) {
+    return "Resend rate limit or daily quota exhausted — check the Resend dashboard for usage/limits.";
+  }
+  if (status === 422 || message.includes("test domain") || message.includes("onboarding@resend.dev")) {
+    return "EMAIL_FROM is the Resend test sender, which only delivers to the account owner's own address — set EMAIL_FROM to a verified domain.";
+  }
+  if (message.includes("not found") || message.includes("invalid from")) {
+    return "Resend rejected the sender — set EMAIL_FROM=\"Display Name <noreply@your-verified-domain.com>\".";
+  }
+  return "Check the Resend dashboard → Logs for the full request and response.";
+}
+
+// ── Resend startup verification ────────────────────────────────────────────────
+
+/**
+ * Contacts the Resend API once at boot to prove two things that cannot be
+ * inferred from the env alone: that the key is accepted, and that the
+ * EMAIL_FROM domain is actually verified.
+ *
+ * This check exists because `RESEND_API_KEY=<non-empty string>` was previously
+ * treated as "email works". A revoked key, a key pasted with surrounding
+ * whitespace, or the default `onboarding@resend.dev` sender all produced a
+ * cheerful "[mail] Email delivery via Resend API" line at startup and then
+ * silently skipped every email hours later, with the API still answering HTTP
+ * 200. Returns true only when a send would actually be accepted.
+ */
+export async function verifyResendConfig() {
+  const client = getResendClient();
+  if (!client) return false;
+
+  let data = null;
+  let error = null;
+  try {
+    const response = await client.domains.list();
+    data = response?.data ?? null;
+    error = response?.error ?? null;
+  } catch (err) {
+    error = err;
+  }
+
+  if (error) {
+    logger.error(
+      `[mail] RESEND_API_KEY was REJECTED by the Resend API — email delivery is broken. ` +
+        `resend said: ${describeResendError(error)} ` +
+        `Hint: ${resendErrorHint(error)}`,
+    );
+    return false;
+  }
+
+  if (env.email.fromInvalid) {
+    logger.error(
+      `[mail] EMAIL_FROM ("${env.email.from}") is not a valid "Display Name <user@domain.com>" ` +
+        "sender — Resend will reject every message. Fix EMAIL_FROM and redeploy.",
+    );
+    return false;
+  }
+
+  const verified = new Set(
+    (data ?? [])
+      .filter((domain) => domain?.status === "verified")
+      .map((domain) => String(domain.name).toLowerCase()),
+  );
+  const fromDomain = env.email.fromDomain;
+
+  if (verified.has(fromDomain)) {
+    logger.info(
+      `[mail] Resend key accepted; sender domain ${fromDomain} is verified — emails will be delivered`,
+    );
+    return true;
+  }
+
+  if (env.email.usesTestSender) {
+    logger.warn(
+      `[mail] EMAIL_FROM is still the Resend test sender (${env.email.from}). Resend only ` +
+        "delivers from onboarding@resend.dev to the account owner's own email address — every " +
+        "other recipient is rejected. Add a domain in the Resend dashboard, verify its DNS " +
+        `records, then set EMAIL_FROM="PharmaHub <noreply@yourdomain.com>". ` +
+        `Key itself is valid; verified domains on this account: ${[...verified].join(", ") || "none"}.`,
+    );
+    return false;
+  }
+
+  logger.error(
+    `[mail] EMAIL_FROM domain "${fromDomain}" is NOT verified on this Resend account ` +
+      `(verified here: ${[...verified].join(", ") || "none"}). The key is valid, but every send ` +
+      "will be rejected by Resend. Verify the domain's DNS records in the Resend dashboard.",
+  );
+  return false;
+}
+
 // ── Startup validation ───────────────────────────────────────────────────────────
 
 /**
- * Startup validation — checks env vars AND verifies the SMTP connection is
- * actually reachable. Never logs the SMTP password or any credential value.
- * Returns true only when email is fully operational.
+ * Startup validation — checks env vars AND verifies the connection is actually
+ * usable (Resend: the key is accepted and the sender domain is verified; SMTP:
+ * the host is reachable and the credentials authenticate). Never logs the
+ * password or any credential value. Returns true only when email is fully
+ * operational — a false result here means real emails will be skipped.
  */
 export async function validateEmailConfig() {
   // ── Resend path (HTTPS, reliable on Render) ────────────────────────────────────
-  if (env.email.apiKey) {
-    if (
-      env.isProduction &&
-      (!env.email.from || env.email.from.includes("resend.dev"))
-    ) {
-      logger.warn(
-        "[mail] RESEND_API_KEY is set but EMAIL_FROM is missing or uses " +
-          "the Resend test domain — production emails will fail. Set " +
-          "EMAIL_FROM to a verified domain in the Resend dashboard.",
+  if (isResendConfigured()) {
+    const usable = await verifyResendConfig();
+    if (!usable && env.isProduction) {
+      logger.error(
+        "[mail] Resend is misconfigured — EVERY verification, password-reset and " +
+          "invitation email will be silently skipped (the API still answers 200). " +
+          "See the errors above.",
       );
     }
-    logger.info(
-      "[mail] Email delivery via Resend API (RESEND_API_KEY configured)",
+    return usable;
+  }
+
+  // A variable that exists but is empty reads as "configured" in every dashboard
+  // while being falsy in code. Call this out instead of quietly using SMTP.
+  if (env.email.apiKeyBlank) {
+    logger.error(
+      "[mail] RESEND_API_KEY is present but EMPTY — Resend is DISABLED and email falls " +
+        "back to SMTP. Paste a real key (starts with 're_') into RESEND_API_KEY and redeploy.",
     );
-    return true;
   }
 
   // ── SMTP path ──────────────────────────────────────────────────────────────────
@@ -117,9 +239,10 @@ export async function validateEmailConfig() {
     return false;
   }
 
-  logger.info(
-    `[mail] SMTP credentials loaded — host=${env.smtp.host}:${env.smtp.port} secure=${env.smtp.secure} from=${env.smtp.from || env.smtp.user}`,
-  );
+    logger.info(
+      `[mail] SMTP credentials loaded — host=${env.smtp.host}:${env.smtp.port} secure=${env.smtp.secure} from=${env.smtp.fromAddress || env.smtp.user}`,
+    );
+
 
   // Quick reachability check — separate "host unreachable" from TLS/auth
   // failures so a timeout in Render logs is immediately actionable.
@@ -159,7 +282,7 @@ export async function validateEmailConfig() {
 }
 
 export function isEmailEnabled() {
-  if (env.email.apiKey) return true;
+  if (isResendConfigured()) return true;
   return isEmailConfigured();
 }
 
@@ -179,34 +302,55 @@ export async function sendEmail({ to, subject, text, html, attachments } = {}) {
           ? Buffer.from(a.content).toString("base64")
           : a.content,
     }));
+    // replyTo must be a bare address — a display-name form or a junk MAIL_FROM
+    // makes Resend reject the entire message, not just the header.
+    const replyTo = env.smtp.fromAddress ?? env.email.fromAddress ?? undefined;
+
+    let data = null;
+    let failure = null;
     try {
-      const { data, error } = await resendClient.emails.send({
+      const response = await resendClient.emails.send({
         from: env.email.from,
-        replyTo: env.smtp.from || env.email.from,
+        ...(replyTo ? { replyTo } : {}),
         to: toList,
         subject,
-        text,
-        html,
+        ...(text ? { text } : {}),
+        ...(html ? { html } : {}),
         ...(resendAttachments?.length ? { attachments: resendAttachments } : {}),
       });
-      if (error) throw new Error(error.message ?? "Resend API send failed");
+      data = response?.data ?? null;
+      // v4+ returns { data, error } without throwing; older builds throw.
+      failure = response?.error ?? null;
+    } catch (err) {
+      failure = err;
+    }
+
+    if (!failure) {
       logger.info(
         `[MAIL DEBUG] sendResult=success (resend) id=${data?.id} recipient=${recipient}`,
       );
       return { skipped: false, messageId: data?.id };
-    } catch (err) {
-      // A failed send must never 500 the caller (registration, verification,
-      // invitations, tickets...). Report it loudly and hand back `skipped` so
-      // callers answer with an honest "email not sent" response.
-      logger.error(
-        `[MAIL DEBUG] sendResult=failure (resend) recipient=${recipient} error=${err?.message ?? err}`,
-      );
-      logger.error(
-        `Email delivery FAILED to ${recipient} via Resend — treated as skipped, not sent. ` +
-          `Check RESEND_API_KEY / EMAIL_FROM (must be a verified Resend domain).`,
-      );
-      return { skipped: true, reason: "delivery_failed", error: err?.message ?? String(err) };
     }
+
+    // A failed send must never 500 the caller (registration, verification,
+    // invitations, tickets...). Report it loudly and hand back `skipped` so
+    // callers answer with an honest "email not sent" response. The full
+    // provider error is kept in the log AND returned, because "it doesn't
+    // work" is otherwise impossible to diagnose from a 200 response.
+    const detail = describeResendError(failure);
+    logger.error(
+      `[MAIL DEBUG] sendResult=failure (resend) recipient=${recipient} from=${env.email.from} ${detail}`,
+    );
+    logger.error(
+      `Email delivery FAILED to ${recipient} via Resend — treated as skipped, not sent. ` +
+        `Resend said: ${detail} Hint: ${resendErrorHint(failure)}`,
+    );
+    return {
+      skipped: true,
+      reason: "delivery_failed",
+      error: detail,
+      hint: resendErrorHint(failure),
+    };
   }
 
   // ── SMTP path ───────────────────────────────────────────────────────────────
@@ -224,7 +368,10 @@ export async function sendEmail({ to, subject, text, html, attachments } = {}) {
     return { skipped: true, reason: "email_unconfigured" };
   }
   try {
-    const fromAddress = env.smtp.from || env.smtp.user || "no-reply@pharmahub.local";
+    // `fromAddress` is already split from any display name in MAIL_FROM, so
+    // re-wrapping it here cannot produce `Name <Name <a@b.com>>`.
+    const fromAddress =
+      env.smtp.fromAddress || env.smtp.user || "no-reply@pharmahub.local";
     const fromName = env.smtp.fromName || "PharmaHub";
     const from = `${fromName} <${fromAddress}>`;
     const info = await transporter.sendMail({

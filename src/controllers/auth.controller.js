@@ -213,6 +213,19 @@ export const resendVerification = asyncHandler(async (req, res) => {
       html: verification.html,
     });
     devCode = delivery?.devCode;
+    // The response below is intentionally identical whether or not the account
+    // exists, so a delivery failure cannot be reported in the body without
+    // turning this endpoint into an account-enumeration oracle. Log it hard
+    // instead — this is the only place a "resend does nothing" bug is visible.
+    if (delivery?.skipped) {
+      logger.error(
+        `[auth.resendVerification] code generated for ${email} but delivery FAILED ` +
+          `(reason=${delivery.reason})` +
+          (delivery.error ? ` providerError="${delivery.error}"` : "") +
+          (delivery.hint ? ` — ${delivery.hint}` : "") +
+          ". The client still received 200, so this log line is the only signal.",
+      );
+    }
   }
   // Same response message whether or not the account exists — no account
   // enumeration. The dev-only `devCode` (present only when delivery is skipped,
