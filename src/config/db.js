@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { getServers, setServers, setDefaultResultOrder } from "node:dns";
+import { setServers, setDefaultResultOrder } from "node:dns";
 
 import { env } from "./env.js";
 import { logger } from "../core/logger.js";
