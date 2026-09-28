@@ -43,11 +43,13 @@ export const createTicket = asyncHandler(async (req, res) => {
 
   const ticketData = {
     ticketId,
-    title: req.body.title,
+    title: req.body.title || req.body.issueTitle,
+    issueTitle: req.body.issueTitle || req.body.title || null,
     issueType: req.body.issueType || "general_inquiry",
     description: req.body.description,
     severity: req.body.severity || "medium",
     screenshot: req.body.screenshot || null,
+    hasScreenshot: Boolean(req.body.screenshot),
     status: "open",
     userId: isAuth ? req.user._id : null,
     userName: isAuth
@@ -148,12 +150,13 @@ export const listTickets = asyncHandler(async (req, res) => {
 
   const andClauses = [];
 
-  // Scoping: Admin and Owner can view all tickets.
-  // Authenticated staff can view tickets created by their userId or userEmail.
-  // Unauthenticated requests can query by userEmail or userId in query params.
-  const isAdminOrOwner = req.user && ["Admin", "Owner"].includes(req.user.role);
+  // Scoping: Dedicated Admin Support account can view all tickets.
+  // All other users (Owner, Pharmacist, Staff, regular users) can ONLY view their own tickets.
+  const isDedicatedAdmin =
+    req.user &&
+    req.user.email?.toLowerCase().trim() === "pharmahub.team@gmail.com";
 
-  if (!isAdminOrOwner) {
+  if (!isDedicatedAdmin) {
     if (req.user) {
       const userConditions = [{ userId: req.user._id }];
       if (req.user.email) {
@@ -212,7 +215,12 @@ export const listTickets = asyncHandler(async (req, res) => {
   const filter = andClauses.length > 0 ? { $and: andClauses } : {};
 
   const [tickets, total] = await Promise.all([
-    Ticket.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    Ticket.find(filter)
+      .select("-screenshot")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
     Ticket.countDocuments(filter),
   ]);
 
@@ -244,9 +252,12 @@ export const getTicket = asyncHandler(async (req, res) => {
   }
 
   // Scoping check: The logged-in user must only be able to view their own tickets.
-  // Admins and Owners have global view permissions.
-  const isAdminOrOwner = req.user && ["Admin", "Owner"].includes(req.user.role);
-  if (!isAdminOrOwner && req.user) {
+  // Only the dedicated Admin Support account (pharmahub.team@gmail.com) has global view permissions.
+  const isDedicatedAdmin =
+    req.user &&
+    req.user.email?.toLowerCase().trim() === "pharmahub.team@gmail.com";
+
+  if (!isDedicatedAdmin && req.user) {
     const isOwner =
       (ticket.userId && String(ticket.userId) === String(req.user._id)) ||
       (ticket.userEmail && req.user.email && ticket.userEmail.toLowerCase() === req.user.email.toLowerCase());
@@ -277,7 +288,7 @@ export const getTicket = asyncHandler(async (req, res) => {
 
 /**
  * PATCH /api/v1/tickets/:id/status
- * Update ticket status and record activity history
+ * Update ticket status and record activity history (Admin/Owner or owner user closing)
  */
 export const updateTicketStatus = asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -287,6 +298,21 @@ export const updateTicketStatus = asyncHandler(async (req, res) => {
   const query = isObjectId
     ? { $or: [{ _id: id }, { ticketId: id.toUpperCase() }] }
     : { ticketId: id.toUpperCase() };
+
+  const ticket = await Ticket.findOne(query);
+  if (!ticket) {
+    throw ApiError.notFound("Ticket not found");
+  }
+
+  const isDedicatedAdmin =
+    req.user &&
+    req.user.email?.toLowerCase().trim() === "pharmahub.team@gmail.com";
+
+  if (!isDedicatedAdmin) {
+    throw ApiError.forbidden(
+      "Only the dedicated Admin Support account (pharmahub.team@gmail.com) can resolve or update ticket status",
+    );
+  }
 
   const eventTitleMap = {
     open: "Ticket Raised",
@@ -314,21 +340,12 @@ export const updateTicketStatus = asyncHandler(async (req, res) => {
     title: eventTitleMap[status] || status,
     description: description || defaultDescMap[status] || `Ticket status updated to ${status}.`,
     timestamp: new Date(),
-    by: req.user?.name || "Support Team",
+    by: req.user?.name || (isDedicatedAdmin ? "Support Team" : "User"),
   };
 
-  const ticket = await Ticket.findOneAndUpdate(
-    query,
-    {
-      $set: { status },
-      $push: { activityTimeline: activityItem },
-    },
-    { new: true, runValidators: true },
-  );
-
-  if (!ticket) {
-    throw ApiError.notFound("Ticket not found");
-  }
+  ticket.status = status;
+  ticket.activityTimeline.push(activityItem);
+  await ticket.save();
 
   recordAudit({
     userId: req.user?._id,
@@ -340,4 +357,151 @@ export const updateTicketStatus = asyncHandler(async (req, res) => {
   });
 
   return ok(res, ticket, "Ticket status updated");
+});
+
+/**
+ * POST /api/v1/tickets/:id/reply
+ * Reply to a ticket. Admin can reply to any ticket and optionally update status.
+ * Normal authenticated user can reply to their own ticket.
+ */
+export const replyTicket = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { message, status } = req.body;
+
+  if (!message || typeof message !== "string" || !message.trim()) {
+    throw ApiError.badRequest("Reply message cannot be empty");
+  }
+
+  const isObjectId = mongoose.Types.ObjectId.isValid(id);
+  const query = isObjectId
+    ? { $or: [{ _id: id }, { ticketId: id.toUpperCase() }] }
+    : { ticketId: id.toUpperCase() };
+
+  const ticket = await Ticket.findOne(query);
+  if (!ticket) {
+    throw ApiError.notFound("Ticket not found");
+  }
+
+  const isDedicatedAdmin =
+    req.user &&
+    req.user.email?.toLowerCase().trim() === "pharmahub.team@gmail.com";
+
+  if (!isDedicatedAdmin) {
+    if (!req.user) {
+      throw ApiError.unauthorized("Authentication required to reply to ticket");
+    }
+    const isOwner =
+      (ticket.userId && String(ticket.userId) === String(req.user._id)) ||
+      (ticket.userEmail && req.user.email && ticket.userEmail.toLowerCase() === req.user.email.toLowerCase());
+    if (!isOwner) {
+      throw ApiError.forbidden("You do not have permission to reply to this ticket");
+    }
+  }
+
+  const senderType = isDedicatedAdmin ? "admin" : "user";
+  const senderName = isDedicatedAdmin
+    ? "PharmaHub Support"
+    : req.user?.name || ticket.userName || "User";
+  const senderRole = isDedicatedAdmin ? "Support Team" : "Customer";
+
+  const messageItem = {
+    sender: senderType,
+    senderName,
+    senderRole,
+    message: message.trim(),
+    timestamp: new Date(),
+  };
+
+  const newStatus = isDedicatedAdmin && status ? status : ticket.status;
+
+  const activityItem = {
+    event: isDedicatedAdmin ? "admin_reply" : "user_reply",
+    status: newStatus,
+    title: isDedicatedAdmin ? "Support Team Reply" : "User Response",
+    description: message.trim(),
+    timestamp: new Date(),
+    by: senderName,
+  };
+
+  if (!Array.isArray(ticket.messages)) {
+    ticket.messages = [];
+  }
+  ticket.messages.push(messageItem);
+  ticket.activityTimeline.push(activityItem);
+
+  if (newStatus !== ticket.status) {
+    ticket.status = newStatus;
+  }
+
+  await ticket.save();
+
+  recordAudit({
+    userId: req.user?._id,
+    userName: senderName,
+    action: `Ticket reply sent by ${senderType}`,
+    entityType: "ticket",
+    entityId: ticket._id,
+    details: { ticketId: ticket.ticketId, newStatus },
+    ip: req.ip,
+  });
+
+  return ok(res, ticket, "Reply sent successfully");
+});
+
+/**
+ * POST /api/v1/tickets/:id/activity
+ * Add custom activity timeline event (Admin or Owner only)
+ */
+export const addTicketActivity = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { title, description, status } = req.body;
+
+  const isDedicatedAdmin =
+    req.user &&
+    req.user.email?.toLowerCase().trim() === "pharmahub.team@gmail.com";
+
+  if (!isDedicatedAdmin) {
+    throw ApiError.forbidden("Only the dedicated Admin Support account (pharmahub.team@gmail.com) can add activity timeline events");
+  }
+
+  if (!description || typeof description !== "string" || !description.trim()) {
+    throw ApiError.badRequest("Activity description is required");
+  }
+
+  const isObjectId = mongoose.Types.ObjectId.isValid(id);
+  const query = isObjectId
+    ? { $or: [{ _id: id }, { ticketId: id.toUpperCase() }] }
+    : { ticketId: id.toUpperCase() };
+
+  const ticket = await Ticket.findOne(query);
+  if (!ticket) {
+    throw ApiError.notFound("Ticket not found");
+  }
+
+  const currentStatus = status || ticket.status;
+  const activityItem = {
+    event: "activity_note",
+    status: currentStatus,
+    title: title?.trim() || "Support Activity Note",
+    description: description.trim(),
+    timestamp: new Date(),
+    by: req.user.name || "Admin Support",
+  };
+
+  ticket.activityTimeline.push(activityItem);
+  if (status && status !== ticket.status) {
+    ticket.status = status;
+  }
+  await ticket.save();
+
+  recordAudit({
+    userId: req.user._id,
+    userName: req.user.name,
+    action: "Ticket activity note added",
+    entityType: "ticket",
+    entityId: ticket._id,
+    ip: req.ip,
+  });
+
+  return ok(res, ticket, "Activity recorded successfully");
 });

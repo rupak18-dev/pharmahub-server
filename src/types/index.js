@@ -441,9 +441,31 @@ export const ticketSchemas = {
       if (!raw || typeof raw !== "object") return raw;
       const body = { ...raw };
       // Map common frontend field aliases
-      if (!body.title && body.subject) body.title = body.subject;
+      if (body.title === undefined && body.issueTitle) body.title = body.issueTitle;
+      if (body.issueTitle === undefined && body.title) body.issueTitle = body.title;
+      if (body.title === undefined && body.subject) body.title = body.subject;
       if (!body.issueType && (body.category || body.type || body.issue)) {
         body.issueType = body.category || body.type || body.issue;
+      }
+      // If predefined issueType is selected and title was completely omitted (undefined), auto-generate title from category
+      if (body.title === undefined && body.issueTitle === undefined && body.issueType) {
+        const catMap = {
+          billing_pos: "Billing, POS & Invoicing Issue",
+          inventory_stock: "Inventory & Stock Discrepancy",
+          medicines_batches: "Medicine Catalog & Batch Tracking",
+          expiry_returns: "Expiry & Returns Management",
+          purchases_suppliers: "Purchase Orders & Supplier Sync",
+          user_access: "User Access & Permissions",
+          reports_export: "Reports & PDF/Excel Export",
+          hardware_integrations: "Integrations & Hardware Setup",
+          system_bug: "System Bug / Technical Error",
+          general_inquiry: "General Inquiry / Feature Feedback",
+        };
+        const derived = catMap[body.issueType] || body.issueType.replace(/_/g, " ");
+        if (body.issueType.toLowerCase() !== "other") {
+          body.title = derived;
+          body.issueTitle = derived;
+        }
       }
       if (!body.description && (body.message || body.details || body.desc)) {
         body.description = body.message || body.details || body.desc;
@@ -467,6 +489,7 @@ export const ticketSchemas = {
         .trim()
         .min(2, "Title must be at least 2 characters")
         .max(250, "Title cannot exceed 250 characters"),
+      issueTitle: z.string().trim().max(250).optional(),
       issueType: z
         .string({ required_error: "Issue type is required" })
         .trim()

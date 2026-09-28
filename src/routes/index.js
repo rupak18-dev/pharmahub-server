@@ -19,6 +19,7 @@ import reportRoutes from "./report.routes.js";
 import dashboardRoutes from "./dashboard.routes.js";
 import integrationRoutes from "./integration.routes.js";
 import ticketRoutes from "./ticket.routes.js";
+import supportRoutes from "./support.routes.js";
 
 const router = Router();
 
@@ -46,5 +47,6 @@ router.use("/reports", reportRoutes);
 router.use("/dashboard", dashboardRoutes);
 router.use("/integrations", integrationRoutes);
 router.use("/tickets", ticketRoutes);
+router.use("/support", supportRoutes);
 
 export default router;

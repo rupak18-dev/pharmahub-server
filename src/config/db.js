@@ -20,12 +20,23 @@ function ensureWorkingDns() {
   } catch {
     // Not supported in older Node versions
   }
-  const servers = getServers();
-  const stuckOnLoopback = servers.every((s) => s === "127.0.0.1" || s === "::1");
-  if (stuckOnLoopback) {
+  try {
     setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);
+  } catch {
+    // Ignore if system restricts setServers
   }
 }
+
+const MONGOOSE_OPTIONS = {
+  serverSelectionTimeoutMS: 20000,
+  socketTimeoutMS: 45000,
+  connectTimeoutMS: 20000,
+  family: 4, // Strictly force IPv4 to prevent NAT64 socket drops and ECONNRESET
+  maxPoolSize: 10,
+  minPoolSize: 2,
+  heartbeatFrequencyMS: 10000,
+  retryWrites: true,
+};
 
 export async function connectDB() {
   ensureWorkingDns();
@@ -41,9 +52,7 @@ export async function connectDB() {
   });
 
   try {
-    await mongoose.connect(env.mongoUri, {
-      serverSelectionTimeoutMS: 30000,
-    });
+    await mongoose.connect(env.mongoUri, MONGOOSE_OPTIONS);
   } catch (err) {
     if (
       err.message?.includes("ECONNREFUSED") ||
@@ -52,10 +61,8 @@ export async function connectDB() {
       err.code === "ENOTFOUND" ||
       err.name === "MongoServerSelectionError"
     ) {
-      setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);
-      await mongoose.connect(env.mongoUri, {
-        serverSelectionTimeoutMS: 30000,
-      });
+      ensureWorkingDns();
+      await mongoose.connect(env.mongoUri, MONGOOSE_OPTIONS);
     } else {
       throw err;
     }

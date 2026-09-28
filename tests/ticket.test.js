@@ -107,6 +107,30 @@ describe("ticketSchemas Validation (Unit)", () => {
     assert.equal(result.data.severity, "high");
   });
 
+  test("accepts issueType 'Other' with custom issueTitle", () => {
+    const customData = {
+      issueType: "Other",
+      issueTitle: "Unable to connect pharmacy printer",
+      description: "Receipt printer on station 3 does not respond over USB.",
+      severity: "high",
+    };
+    const result = ticketSchemas.create.safeParse(customData);
+    assert.equal(result.success, true);
+    assert.equal(result.data.issueType, "Other");
+    assert.equal(result.data.title, "Unable to connect pharmacy printer");
+    assert.equal(result.data.issueTitle, "Unable to connect pharmacy printer");
+  });
+
+  test("auto-generates title for predefined category when title is omitted", () => {
+    const dataWithoutTitle = {
+      issueType: "billing_pos",
+      description: "Cash drawer won't open when finalizing sale.",
+    };
+    const result = ticketSchemas.create.safeParse(dataWithoutTitle);
+    assert.equal(result.success, true);
+    assert.equal(result.data.title, "Billing, POS & Invoicing Issue");
+  });
+
   test("rejects empty title or title exceeding max length", () => {
     const empty = ticketSchemas.create.safeParse({
       title: "",
@@ -356,10 +380,27 @@ describe(
       assert.ok(json.data.some((t) => t.ticketId === createdTicket.ticketId));
     });
 
-    test("update ticket status via PATCH /tickets/:id/status", async () => {
+    test("unauthenticated PATCH /tickets/:id/status is rejected with 401", async () => {
       const res = await request(`/tickets/${createdTicket.ticketId}/status`, {
         method: "PATCH",
         body: { status: "in_progress" },
+      });
+      assert.equal(res.status, 401);
+    });
+
+    test("admin can update ticket status via PATCH /tickets/:id/status", async () => {
+      const loginRes = await request("/auth/login", {
+        method: "POST",
+        body: {
+          email: "pharmahub.team@gmail.com",
+          password: "Pharmahub@123",
+        },
+      });
+      const cookieHeader = loginRes.headers.get("set-cookie");
+      const res = await request(`/tickets/${createdTicket.ticketId}/status`, {
+        method: "PATCH",
+        body: { status: "in_progress" },
+        headers: cookieHeader ? { Cookie: cookieHeader } : {},
       });
       assert.equal(res.status, 200);
       const json = await res.json();

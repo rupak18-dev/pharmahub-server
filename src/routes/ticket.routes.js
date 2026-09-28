@@ -1,6 +1,6 @@
 import { Router } from "express";
 
-import { optionalAuth } from "../middlewares/auth.js";
+import { auth, optionalAuth } from "../middlewares/auth.js";
 import { validate } from "../middlewares/validate.js";
 import { ticketSchemas } from "../types/index.js";
 import * as ticketController from "../controllers/ticket.controller.js";
@@ -28,9 +28,21 @@ router.get(
 
 router.patch(
   "/:id/status",
-  optionalAuth,
+  auth,
   validate(ticketSchemas.updateStatus),
   ticketController.updateTicketStatus,
+);
+
+router.post(
+  "/:id/reply",
+  auth,
+  ticketController.replyTicket,
+);
+
+router.post(
+  "/:id/activity",
+  auth,
+  ticketController.addTicketActivity,
 );
 
 export default router;
