@@ -61,11 +61,20 @@ export const constants = {
   // order): Home, Stock Management, Purchase & Trades, Analytics, Access
   // Management. `modules` drives permission matrices; `accessModules` drives
   // the per-user access whitelist. Keep both in sync with the sidebar.
+  //
+  // `inventory` and `notifications` were missing here while
+  // /inventory/* and /notifications/* routes already guarded on them. Because
+  // this list builds the default permission matrix, the two keys could never
+  // exist in a role's permissions, so `authorize()` looked them up, found
+  // undefined and threw 403 — every one of those endpoints was silently
+  // Owner-only. Any module a route passes to `authorize()` MUST be listed here.
   modules: [
     "dashboard",
     "medicines",
     "batches",
+    "inventory",
     "expiry",
+    "notifications",
     "audit",
     "purchases",
     "sales",
@@ -80,7 +89,9 @@ export const constants = {
     "dashboard",
     "medicines",
     "batches",
+    "inventory",
     "expiry",
+    "notifications",
     "audit",
     "purchases",
     "sales",

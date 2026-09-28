@@ -12,8 +12,52 @@ import { sendEmail } from "../services/mailer.js";
 import { buildTicketConfirmationEmail } from "../services/emailTemplates.js";
 
 /**
- * Generate a unique ticket ID in format PH-TKT-YYYY-#####
+ * Roles that may read and update every ticket in the system, not just their
+ * own. Kept in sync with the read policy below — anything allowed to view a
+ * ticket is allowed to act on it.
  */
+const GLOBAL_TICKET_ROLES = ["Admin", "Owner"];
+
+function canAccessAllTickets(user) {
+  return (
+    Boolean(user) &&
+    (GLOBAL_TICKET_ROLES.includes(user.role) ||
+      user.email?.toLowerCase().trim() === "pharmahub.team@gmail.com")
+  );
+}
+
+/**
+ * A ticket belongs to the user who raised it. Tickets created through the
+ * public form have `userId: null` (the visitor had no account), so the
+ * reporter's claimed email is the only link back to a real user — which is
+ * why `userEmail` is part of the match.
+ */
+function ownsTicket(ticket, user) {
+  if (!user) return false;
+  if (ticket.userId && String(ticket.userId) === String(user._id)) return true;
+
+  return Boolean(
+    ticket.userEmail &&
+      user.email &&
+      String(ticket.userEmail).toLowerCase() === String(user.email).toLowerCase(),
+  );
+}
+
+/**
+ * Throws unless the caller may act on this ticket. `auth` guarantees
+ * `req.user` is set on every route that reaches here, so a missing user is a
+ * bug worth failing loudly rather than silently allowing.
+ */
+function assertTicketAccess(ticket, user) {
+  if (!user) {
+    throw ApiError.unauthorized("Authentication required");
+  }
+  if (canAccessAllTickets(user) || ownsTicket(ticket, user)) return;
+
+  throw ApiError.forbidden("You do not have permission to access this ticket");
+}
+
+/** Generate a unique ticket ID in format PH-TKT-YYYY-##### */
 export async function generateTicketId() {
   const year = new Date().getFullYear();
   let attempts = 0;
@@ -150,35 +194,14 @@ export const listTickets = asyncHandler(async (req, res) => {
 
   const andClauses = [];
 
-  // Scoping: Dedicated Admin Support account can view all tickets.
-  // All other users (Owner, Pharmacist, Staff, regular users) can ONLY view their own tickets.
-  const isDedicatedAdmin =
-    req.user &&
-    req.user.email?.toLowerCase().trim() === "pharmahub.team@gmail.com";
-
-  if (!isDedicatedAdmin) {
-    if (req.user) {
-      const userConditions = [{ userId: req.user._id }];
-      if (req.user.email) {
-        userConditions.push({ userEmail: req.user.email.toLowerCase() });
-      }
-      andClauses.push({ $or: userConditions });
-    } else if (req.query.userEmail || req.query.userId) {
-      const conditions = [];
-      if (req.query.userId && mongoose.Types.ObjectId.isValid(req.query.userId)) {
-        conditions.push({ userId: req.query.userId });
-      }
-      if (req.query.userEmail) {
-        conditions.push({ userEmail: req.query.userEmail.toLowerCase().trim() });
-      }
-      if (conditions.length > 0) {
-        andClauses.push({ $or: conditions });
-      } else {
-        throw ApiError.unauthorized("Authentication required");
-      }
-    } else {
-      throw ApiError.unauthorized("Authentication required");
+  // Scoping: Admin and Owner can view all tickets; everyone else sees only the
+  // tickets they raised.
+  if (!canAccessAllTickets(req.user)) {
+    const userConditions = [{ userId: req.user._id }];
+    if (req.user.email) {
+      userConditions.push({ userEmail: req.user.email.toLowerCase() });
     }
+    andClauses.push({ $or: userConditions });
   }
 
   // Filter by status
@@ -251,20 +274,9 @@ export const getTicket = asyncHandler(async (req, res) => {
     throw ApiError.notFound("Ticket not found");
   }
 
-  // Scoping check: The logged-in user must only be able to view their own tickets.
-  // Only the dedicated Admin Support account (pharmahub.team@gmail.com) has global view permissions.
-  const isDedicatedAdmin =
-    req.user &&
-    req.user.email?.toLowerCase().trim() === "pharmahub.team@gmail.com";
-
-  if (!isDedicatedAdmin && req.user) {
-    const isOwner =
-      (ticket.userId && String(ticket.userId) === String(req.user._id)) ||
-      (ticket.userEmail && req.user.email && ticket.userEmail.toLowerCase() === req.user.email.toLowerCase());
-    if (!isOwner) {
-      throw ApiError.forbidden("You do not have permission to view this ticket");
-    }
-  }
+  // Scoping check: the caller must own the ticket unless they are an
+  // Admin/Owner or dedicated admin support.
+  assertTicketAccess(ticket, req.user);
 
   // Ensure activityTimeline always has at least the initial creation event
   if (!ticket.activityTimeline || ticket.activityTimeline.length === 0) {
@@ -299,20 +311,6 @@ export const updateTicketStatus = asyncHandler(async (req, res) => {
     ? { $or: [{ _id: id }, { ticketId: id.toUpperCase() }] }
     : { ticketId: id.toUpperCase() };
 
-  const ticket = await Ticket.findOne(query);
-  if (!ticket) {
-    throw ApiError.notFound("Ticket not found");
-  }
-
-  const isDedicatedAdmin =
-    req.user &&
-    req.user.email?.toLowerCase().trim() === "pharmahub.team@gmail.com";
-
-  if (!isDedicatedAdmin) {
-    throw ApiError.forbidden(
-      "Only the dedicated Admin Support account (pharmahub.team@gmail.com) can resolve or update ticket status",
-    );
-  }
 
   const eventTitleMap = {
     open: "Ticket Raised",
@@ -334,6 +332,22 @@ export const updateTicketStatus = asyncHandler(async (req, res) => {
     closed: "Ticket was closed.",
   };
 
+  // Load the ticket and authorize BEFORE mutating. This handler used to go
+  // straight to `findOneAndUpdate` with no reference to `req.user` at all, so
+  // `optionalAuth` on the route meant an unauthenticated caller could close,
+  // resolve or reopen any ticket in the system just by guessing its
+  // `PH-TKT-YYYY-#####` id — and the write was indistinguishable from a
+  // legitimate support action in the activity timeline.
+  const existing = await Ticket.findOne(query).lean();
+  if (!existing) {
+    throw ApiError.notFound("Ticket not found");
+  }
+  assertTicketAccess(existing, req.user);
+
+  const isDedicatedAdmin =
+    req.user &&
+    req.user.email?.toLowerCase().trim() === "pharmahub.team@gmail.com";
+
   const activityItem = {
     event: status,
     status,
@@ -343,9 +357,21 @@ export const updateTicketStatus = asyncHandler(async (req, res) => {
     by: req.user?.name || (isDedicatedAdmin ? "Support Team" : "User"),
   };
 
-  ticket.status = status;
-  ticket.activityTimeline.push(activityItem);
-  await ticket.save();
+  // Keyed on the already-resolved `_id` rather than the caller-supplied string,
+  // so a concurrent insert cannot redirect the write to a different ticket
+  // between the permission check and the update.
+  const ticket = await Ticket.findOneAndUpdate(
+    { _id: existing._id },
+    {
+      $set: { status },
+      $push: { activityTimeline: activityItem },
+    },
+    { new: true, runValidators: true },
+  );
+
+  if (!ticket) {
+    throw ApiError.notFound("Ticket not found");
+  }
 
   recordAudit({
     userId: req.user?._id,

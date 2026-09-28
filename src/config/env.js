@@ -21,6 +21,49 @@ function envVar(...names) {
   return undefined;
 }
 
+/**
+ * Returns a trimmed env value, or undefined when the variable is unset *or*
+ * blank. `envVar` is not enough on its own for provider credentials: a var that
+ * is defined but empty (`RESEND_API_KEY=`) reads as "configured" in most
+ * dashboards while being falsy in code, so the provider silently switches off.
+ */
+function trimmedEnv(...names) {
+  for (const name of names) {
+    const raw = process.env[name];
+
+    if (typeof raw === "string" && raw.trim() !== "") {
+      return raw.trim();
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Splits a `Display Name <user@domain.com>` sender string into its parts.
+ * Mail providers reject a malformed sender for the WHOLE message, so the
+ * address/domain must be extractable and valid before it is handed over.
+ */
+function parseSender(raw) {
+  if (!raw) return { name: null, address: null, domain: null };
+
+  const value = raw.replace(/^['"]|['"]$/g, "").trim();
+  const angle = value.match(/^(.*?)<([^>]+)>\s*$/);
+
+  const name = angle
+    ? angle[1].replace(/^['"]|['"]$/g, "").trim() || null
+    : null;
+  const address = (angle ? angle[2] : value).trim();
+
+  const at = address.lastIndexOf("@");
+  const domain = at === -1 ? null : address.slice(at + 1).toLowerCase();
+
+  // Not `local@domain.tld` shaped — providers will reject it.
+  const valid = domain !== null && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address);
+
+  return { name, address: valid ? address : null, domain: valid ? domain : null };
+}
+
 const nodeEnv = envVar("NODE_ENV", "node_env") ?? "development";
 const isProduction = nodeEnv === "production";
 
@@ -103,12 +146,37 @@ export const whatsAppConfig = {
     process.env.CURRENCY_SYMBOL ?? "₹",
 };
 
-const emailConfig = {
-  apiKey: process.env.RESEND_API_KEY ?? null,
+// Resend's shared onboarding domain. It only delivers to the account owner's own
+// address, so it is a dev convenience and a production footgun — it is reported
+// as a misconfiguration by validateEmailConfig().
+const RESEND_TEST_FROM = "PharmaHub <onboarding@resend.dev>";
 
-  from:
-    process.env.EMAIL_FROM ??
-    "PharmaHub <onboarding@resend.dev>",
+const resendSender = parseSender(trimmedEnv("EMAIL_FROM") ?? RESEND_TEST_FROM);
+const mailFromSender = parseSender(trimmedEnv("MAIL_FROM"));
+
+const emailConfig = {
+  apiKey: trimmedEnv("RESEND_API_KEY") ?? null,
+
+  // The variable is defined but blank. Resend is OFF in this case (apiKey is
+  // null) even though the dashboard shows the key, so it is surfaced at startup
+  // instead of silently falling back to SMTP.
+  apiKeyBlank:
+    process.env.RESEND_API_KEY !== undefined &&
+    process.env.RESEND_API_KEY.trim() === "",
+
+  from: trimmedEnv("EMAIL_FROM") ?? RESEND_TEST_FROM,
+
+  fromName: resendSender.name,
+
+  fromAddress: resendSender.address,
+
+  fromDomain: resendSender.domain,
+
+  // True for the Resend test sender, which cannot reach arbitrary recipients.
+  usesTestSender: resendSender.domain === "resend.dev",
+
+  // EMAIL_FROM is set but is not a usable `local@domain.tld` sender.
+  fromInvalid: trimmedEnv("EMAIL_FROM") !== undefined && !resendSender.address,
 };
 
 export const env = {
@@ -149,8 +217,10 @@ export const env = {
     envVar("CORS_ORIGIN", "cors_origin") ??
     "*",
 
-  // Demo account passwords (development/demo flows only). Never hardcoded —
-  // they must be provided via environment configuration (.env).
+  // Demo-account passwords (development/demo flows ONLY). There are no code
+  // defaults — they must come from environment configuration. Demo auto-login
+  // degrades gracefully (401 + warn) when unset, and production ignores demos
+  // regardless.
   demoAccountPassword: process.env.DEMO_ACCOUNT_PASSWORD ?? "",
 
   devDemoPassword: process.env.DEV_DEMO_PASSWORD ?? "",
@@ -159,6 +229,19 @@ export const env = {
   // logins, magic-link demo signup, seeded dev user). Off unless explicitly
   // enabled in the environment; production always ignores them.
   enableDemoAccounts: process.env.ENABLE_DEMO_ACCOUNTS === "true",
+
+  // When email delivery is NOT configured (no SMTP/Resend), the OTP would
+  // otherwise be unretrievable. This opt-in surfaces the generated code as
+  // `devCode` in the register/resend response so local/demo UIs (which already
+  // render it) keep working. Off by default; ignored in production unless the
+  // separate `echoDevCodeInProduction` opt-in is also set (for TEST deployments
+  // that must stay usable while e.g. Gmail SMTP is unreachable from the host).
+  echoDevCode: process.env.EMAIL_DEV_CODE === "true",
+
+  // Explicit second key that lets a NON-production-grade TEST service (Render
+  // free tier, no working SMTP egress) echo the dev code in production mode.
+  // Real production must never set EMAIL_DEV_CODE_PROD=true.
+  echoDevCodeInProduction: process.env.EMAIL_DEV_CODE_PROD === "true",
 
   cookie: {
     name: "pharmahub_session",
@@ -193,31 +276,39 @@ export const env = {
 
   // Email / invitation configuration
   smtp: {
-    host: process.env.SMTP_HOST ?? "",
+    host: trimmedEnv("SMTP_HOST") ?? "",
 
     port: parseInt(
-      process.env.SMTP_PORT ?? "587",
+      trimmedEnv("SMTP_PORT") ?? "587",
       10,
     ),
 
-    secure: process.env.SMTP_SECURE
-      ? process.env.SMTP_SECURE === "true"
+    secure: trimmedEnv("SMTP_SECURE")
+      ? trimmedEnv("SMTP_SECURE") === "true"
       : parseInt(
-          process.env.SMTP_PORT ?? "587",
+          trimmedEnv("SMTP_PORT") ?? "587",
           10,
         ) === 465,
 
-    user: process.env.SMTP_USER ?? "",
+    user: trimmedEnv("SMTP_USER") ?? "",
 
     pass:
-      process.env.SMTP_PASSWORD ??
-      process.env.SMTP_PASS ??
+      trimmedEnv("SMTP_PASSWORD") ??
+      trimmedEnv("SMTP_PASS") ??
       "",
 
-    from: process.env.MAIL_FROM ?? "",
+    from: trimmedEnv("MAIL_FROM") ?? "",
 
+    // `PharmaHub <a@b.com>` and `a@b.com` are both accepted; splitting them
+    // here keeps mailer.js from re-wrapping an already-wrapped address into
+    // `PharmaHub <PharmaHub <a@b.com>>`.
+    fromAddress: mailFromSender.address,
+
+    // An explicit MAIL_FROM_NAME wins, then any display name embedded in
+    // MAIL_FROM, then the product default.
     fromName:
-      process.env.MAIL_FROM_NAME ??
+      trimmedEnv("MAIL_FROM_NAME") ??
+      mailFromSender.name ??
       "PharmaHub",
   },
 
@@ -242,6 +333,10 @@ export const isEmailConfigured = () =>
       env.smtp.pass &&
       (env.smtp.from || env.smtp.user),
   );
+
+// Resend configuration check. Requires a NON-BLANK key: a variable that exists
+// but holds an empty string leaves Resend disabled, so it must not count here.
+export const isResendConfigured = () => Boolean(env.email.apiKey);
 
 // Google configuration check
 export const isGoogleConfigured = () =>

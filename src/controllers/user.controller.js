@@ -154,7 +154,6 @@ export const listUsers = asyncHandler(async (req, res) => {
 
   const callerId = req.user._id;
   const inviterId = req.user.invitedBy || req.user.createdBy;
-  const orgName = req.user.orgName?.trim();
 
   // Tenant/team scoping:
   // Admin/Owner sees themselves and users they invited/created.
@@ -169,12 +168,6 @@ export const listUsers = asyncHandler(async (req, res) => {
     scopeConditions.push({ _id: inviterId });
     scopeConditions.push({ invitedBy: inviterId });
     scopeConditions.push({ createdBy: inviterId });
-  }
-
-  if (orgName && orgName.toLowerCase() !== "pharmahub") {
-    scopeConditions.push({
-      orgName: new RegExp(`^${orgName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
-    });
   }
 
   // Seed demo emails to exclude from live users list unless the caller is that demo account
@@ -237,7 +230,18 @@ export const getUser = asyncHandler(async (req, res) => {
 // effective permissions. Registered before /:id so "me" is never treated as an
 // ObjectId. This is the primary auth hydration endpoint used by the frontend.
 export const getMe = asyncHandler(async (req, res) => {
+  // Identity must never be served from any HTTP cache — a cached response
+  // could return the PREVIOUS user after a logout + different login.
+  res.set("Cache-Control", "no-store");
   const user = await User.findById(req.user._id).lean();
+  if (!user) {
+    // Middleware already verified the user exists; this is a safety fallback
+    // for the renderer race between auth and lookup.
+    logger.warn(`[users.me] token userId=${req.user._id} not found in database`);
+    const publicUser = await toAuthUser(req.user);
+    publicUser.profileCompletion = computeProfileCompletion(req.user);
+    return ok(res, publicUser);
+  }
   const publicUser = await toAuthUser(user);
   publicUser.profileCompletion = computeProfileCompletion(user);
   return ok(res, publicUser);
@@ -348,6 +352,11 @@ export const removeAvatar = asyncHandler(async (req, res) => {
 });
 
 export const createUser = asyncHandler(async (req, res) => {
+  // Privilege-escalation guard: only an Owner may create Owner accounts —
+  // mirrors the same constraint enforced on role changes in updateUser.
+  if (req.body.role === "Owner" && req.user?.role !== "Owner") {
+    throw ApiError.forbidden("Only the Owner can create Owner accounts");
+  }
   await assertRoleExists(req.body.role);
   const existing = await User.findOne({ email: req.body.email.toLowerCase() }).collation({
     locale: "en",
@@ -397,11 +406,15 @@ export const updateUser = asyncHandler(async (req, res) => {
       accessIds,
     } = req.body;
 
-    if (role !== undefined) {
-      await assertRoleExists(role);
-      invitation.role = role;
-      invitation.roleId = (await resolveRoleId(role)) ?? null;
+  if (role !== undefined) {
+    if (role === "Owner" && req.user?.role !== "Owner") {
+      throw ApiError.forbidden("Only the Owner can assign the Owner role");
     }
+    await assertRoleExists(role);
+    invitation.role = role;
+    invitation.roleId = (await resolveRoleId(role)) ?? null;
+  }
+
     if (name !== undefined) invitation.name = name;
     if (phone !== undefined) invitation.phone = phone;
     if (department !== undefined) invitation.department = department;
@@ -900,6 +913,9 @@ export const inviteUser = asyncHandler(async (req, res) => {
     `[users.invite] POST /users/invite — by=${req.user.email} org=${req.user.orgName ?? "(none)"} target=${email ?? "(missing)"} role=${role ?? "(missing)"}`,
   );
   if (!email || !role) throw ApiError.badRequest("Email and role are required");
+  if (role === "Owner" && req.user?.role !== "Owner") {
+    throw ApiError.forbidden("Only the Owner can assign the Owner role");
+  }
   await assertRoleExists(role);
   logger.info(`[users.invite] role "${role}" verified`);
 
@@ -1366,18 +1382,11 @@ export const getInvitationLink = asyncHandler(async (req, res) => {
 export const listInvitations = asyncHandler(async (req, res) => {
   const callerId = req.user._id;
   const inviterId = req.user.invitedBy || req.user.createdBy;
-  const orgName = req.user.orgName?.trim();
 
   const scopeConditions = [{ invitedBy: callerId }];
 
   if (inviterId) {
     scopeConditions.push({ invitedBy: inviterId });
-  }
-
-  if (orgName && orgName.toLowerCase() !== "pharmahub") {
-    scopeConditions.push({
-      orgName: new RegExp(`^${orgName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
-    });
   }
 
   const filter = {

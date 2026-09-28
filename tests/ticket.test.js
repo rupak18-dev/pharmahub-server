@@ -5,7 +5,9 @@ import mongoose from "mongoose";
 import { createApp } from "../src/app.js";
 import { env } from "../src/config/env.js";
 import { Ticket } from "../src/models/Ticket.js";
+import { User } from "../src/models/User.js";
 import { generateTicketId } from "../src/controllers/ticket.controller.js";
+import { issueToken } from "../src/services/auth.service.js";
 import { ticketSchemas } from "../src/types/index.js";
 import { buildTicketConfirmationEmail } from "../src/services/emailTemplates.js";
 
@@ -33,6 +35,7 @@ try {
 
 let server;
 let base;
+let testUserIds = [];
 
 before(async () => {
   if (!connected) return;
@@ -46,20 +49,36 @@ after(async () => {
   if (server) await new Promise((resolve) => server.close(resolve));
   if (connected) {
     await Ticket.deleteMany({ title: { $regex: /^Test ticket/i } });
+    if (testUserIds.length > 0) {
+      await User.deleteMany({ _id: { $in: testUserIds } });
+    }
     await mongoose.disconnect();
   }
 });
 
-async function request(path, { method = "GET", body, headers = {} } = {}) {
+async function request(path, { method = "GET", body, token, headers = {} } = {}) {
   return fetch(`${base}/api/v1${path}`, {
     method,
     headers: {
       "Content-Type": "application/json",
       "X-PharmaHub-Client": "web",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...headers,
     },
     body: body ? JSON.stringify(body) : undefined,
   });
+}
+
+/**
+ * Creates an active user directly in the database and returns a signed JWT for
+ * them. Registering through the API would also mean driving the OTP verification
+ * flow, which these tests are not about — the point here is exercising the
+ * ticket authorization rules, not the signup path.
+ */
+async function createTestUser({ name, email, role = "" }) {
+  const user = await User.create({ name, email, role, emailVerified: true, status: "active" });
+  testUserIds.push(user._id);
+  return { user, token: issueToken(user._id) };
 }
 
 describe("ticketSchemas Validation (Unit)", () => {
@@ -327,65 +346,200 @@ describe(
       createdTicket = json.data;
     });
 
-    test("get ticket by MongoDB _id", async () => {
-      assert.ok(createdTicket?._id);
-      const res = await request(`/tickets/${createdTicket._id}`);
-      assert.equal(res.status, 200);
-      const json = await res.json();
-      assert.equal(json.success, true);
-      assert.equal(json.data.ticketId, createdTicket.ticketId);
-      assert.equal(json.data.title, createdTicket.title);
+    // The ticket above was raised through the public form, so it has no userId —
+    // the reporter is identified only by the email captured in the body. These
+    // accounts exist to exercise the read/write scoping rules.
+    const stamp = Date.now();
+    let reporterToken;
+    let strangerToken;
+    let adminToken;
+    let ownedTicket;
+    let strangerTicket;
+
+    test("create the reporter, a stranger and an admin account", async () => {
+      const reporter = await createTestUser({
+        name: "Satya Prakash",
+        email: `reporter-${stamp}@pharmacy.com`,
+      });
+      reporterToken = reporter.token;
+
+      const stranger = await createTestUser({
+        name: "Nosy Stranger",
+        email: `stranger-${stamp}@example.com`,
+      });
+      strangerToken = stranger.token;
+
+      const admin = await createTestUser({
+        name: "Support Admin",
+        email: `admin-${stamp}@pharmacy.com`,
+        role: "Admin",
+      });
+      adminToken = admin.token;
+
+      assert.ok(reporterToken && strangerToken && adminToken);
     });
 
-    test("get ticket by human-readable ticketId", async () => {
-      assert.ok(createdTicket?.ticketId);
-      const res = await request(`/tickets/${createdTicket.ticketId}`);
+    test("raise a ticket while signed in links it to the caller", async () => {
+      // Titles must start with "Test ticket" so the suite's after() hook
+      // cleans these rows up out of the shared dev database.
+      const res = await request("/tickets", {
+        method: "POST",
+        token: reporterToken,
+        body: {
+          title: `Test ticket: reporter issue ${stamp}`,
+          issueType: "general_inquiry",
+          description: "Signed-in reporter cannot see the tax summary widget.",
+        },
+      });
+      assert.equal(res.status, 201);
+      ownedTicket = (await res.json()).data;
+      assert.ok(ownedTicket.userId, "an authenticated ticket must be linked to a user");
+
+      const other = await request("/tickets", {
+        method: "POST",
+        token: strangerToken,
+        body: {
+          title: `Test ticket: stranger issue ${stamp}`,
+          issueType: "general_inquiry",
+          description: "A different user's ticket, used to prove scoping.",
+        },
+      });
+      assert.equal(other.status, 201);
+      strangerTicket = (await other.json()).data;
+      assert.notEqual(String(ownedTicket._id), String(strangerTicket._id));
+    });
+
+    test("reading tickets requires authentication", async () => {
+      // The list route used to accept an anonymous `?userEmail=` and return that
+      // person's tickets; the detail route skipped its ownership check entirely
+      // when `req.user` was absent.
+      assert.equal((await request("/tickets")).status, 401);
+      assert.equal((await request(`/tickets/${createdTicket._id}`)).status, 401);
+      assert.equal((await request(`/tickets/${createdTicket.ticketId}`)).status, 401);
+      assert.equal((await request(`/tickets/${ownedTicket._id}`)).status, 401);
+      assert.equal((await request("/tickets?userEmail=satya@pharmacy.com")).status, 401);
+    });
+
+    test("updating ticket status requires authentication and does not mutate", async () => {
+      // `optionalAuth` + a handler that never referenced `req.user` meant anyone
+      // could close or resolve any ticket by guessing its id.
+      for (const id of [createdTicket.ticketId, ownedTicket.ticketId]) {
+        const res = await request(`/tickets/${id}/status`, {
+          method: "PATCH",
+          body: { status: "closed" },
+        });
+        assert.equal(res.status, 401);
+      }
+
+      assert.equal((await Ticket.findById(createdTicket._id).lean()).status, "open");
+      assert.equal((await Ticket.findById(ownedTicket._id).lean()).status, "open");
+    });
+
+    test("reporter can read their own ticket by MongoDB _id", async () => {
+      assert.ok(ownedTicket?._id);
+      const res = await request(`/tickets/${ownedTicket._id}`, { token: reporterToken });
       assert.equal(res.status, 200);
       const json = await res.json();
       assert.equal(json.success, true);
-      assert.equal(json.data._id, createdTicket._id);
-      assert.equal(json.data.title, createdTicket.title);
+      assert.equal(json.data.ticketId, ownedTicket.ticketId);
+      assert.equal(json.data.title, ownedTicket.title);
+    });
+
+    test("reporter can read their own ticket by human-readable ticketId", async () => {
+      assert.ok(ownedTicket?.ticketId);
+      const res = await request(`/tickets/${ownedTicket.ticketId}`, { token: reporterToken });
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.success, true);
+      assert.equal(json.data._id, ownedTicket._id);
+      assert.equal(json.data.title, ownedTicket.title);
     });
 
     test("get ticket with unknown ID returns 404", async () => {
-      const res = await request("/tickets/PH-TKT-9999-00000");
+      const res = await request("/tickets/PH-TKT-9999-00000", { token: reporterToken });
       assert.equal(res.status, 404);
       const json = await res.json();
       assert.equal(json.success, false);
     });
 
-    test("list tickets with userEmail filter", async () => {
-      const res = await request("/tickets?userEmail=satya@pharmacy.com&status=open&severity=high&page=1&limit=20");
+    test("a different authenticated user cannot read the ticket", async () => {
+      const res = await request(`/tickets/${ownedTicket.ticketId}`, { token: strangerToken });
+      assert.equal(res.status, 403);
+    });
+
+    test("a ticket raised anonymously is not readable by an unrelated user", async () => {
+      // `userId` is null, so ownership falls back to the email in the body —
+      // which the stranger's account does not match.
+      const res = await request(`/tickets/${createdTicket.ticketId}`, { token: strangerToken });
+      assert.equal(res.status, 403);
+    });
+
+    test("a different authenticated user cannot change the ticket status", async () => {
+      const res = await request(`/tickets/${ownedTicket.ticketId}/status`, {
+        method: "PATCH",
+        token: strangerToken,
+        body: { status: "resolved" },
+      });
+      assert.equal(res.status, 403);
+
+      assert.equal((await Ticket.findById(ownedTicket._id).lean()).status, "open");
+    });
+
+    test("list tickets is scoped to the caller", async () => {
+      const res = await request("/tickets?status=open&page=1&limit=20", {
+        token: reporterToken,
+      });
       assert.equal(res.status, 200);
       const json = await res.json();
       assert.equal(json.success, true);
       assert.equal(json.message, "Tickets list");
       assert.ok(Array.isArray(json.data));
-      assert.ok(json.data.length >= 1);
       assert.ok(json.meta);
       assert.equal(json.meta.page, 1);
       assert.equal(json.meta.limit, 20);
       assert.ok(typeof json.meta.total === "number");
       assert.ok(typeof json.meta.totalPages === "number");
 
-      const match = json.data.find((t) => t.ticketId === createdTicket.ticketId);
-      assert.ok(match);
+      assert.ok(json.data.some((t) => t.ticketId === ownedTicket.ticketId));
+      assert.ok(!json.data.some((t) => t.ticketId === strangerTicket.ticketId));
+    });
+
+    test("a userEmail query parameter no longer widens list scoping", async () => {
+      // This parameter used to be the entire authorization decision for an
+      // anonymous caller. It is now an inert filter on an already-scoped result
+      // set, so naming another user's address returns only your own tickets.
+      const res = await request("/tickets?userEmail=stranger@example.com", {
+        token: reporterToken,
+      });
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.ok(!json.data.some((t) => t.ticketId === strangerTicket.ticketId));
     });
 
     test("list tickets with search query parameter", async () => {
-      const res = await request(`/tickets?userEmail=satya@pharmacy.com&search=${encodeURIComponent(createdTicket.ticketId)}`);
+      const res = await request(
+        `/tickets?search=${encodeURIComponent(ownedTicket.ticketId)}`,
+        { token: reporterToken },
+      );
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.ok(json.data.some((t) => t.ticketId === ownedTicket.ticketId));
+    });
+    test("reporter can update ticket status via PATCH /tickets/:id/status", async () => {
+      const res = await request(`/tickets/${ownedTicket.ticketId}/status`, {
+        method: "PATCH",
+        token: reporterToken,
+        body: { status: "in_progress" },
+      });
       assert.equal(res.status, 200);
       const json = await res.json();
       assert.equal(json.success, true);
-      assert.ok(json.data.some((t) => t.ticketId === createdTicket.ticketId));
-    });
+      assert.equal(json.data.status, "in_progress");
 
-    test("unauthenticated PATCH /tickets/:id/status is rejected with 401", async () => {
-      const res = await request(`/tickets/${createdTicket.ticketId}/status`, {
-        method: "PATCH",
-        body: { status: "in_progress" },
-      });
-      assert.equal(res.status, 401);
+      // Verify persistence
+      const verifyRes = await request(`/tickets/${ownedTicket._id}`, { token: reporterToken });
+      const verifyJson = await verifyRes.json();
+      assert.equal(verifyJson.data.status, "in_progress");
     });
 
     test("admin can update ticket status via PATCH /tickets/:id/status", async () => {
@@ -408,9 +562,30 @@ describe(
       assert.equal(json.data.status, "in_progress");
 
       // Verify persistence
-      const verifyRes = await request(`/tickets/${createdTicket._id}`);
+      const verifyRes = await request(`/tickets/${createdTicket._id}`, {
+        headers: cookieHeader ? { Cookie: cookieHeader } : {},
+      });
       const verifyJson = await verifyRes.json();
       assert.equal(verifyJson.data.status, "in_progress");
     });
+
+    test("an Admin can read and update a ticket they do not own", async () => {
+      const read = await request(`/tickets/${ownedTicket.ticketId}`, { token: adminToken });
+      assert.equal(read.status, 200);
+
+      // Including the anonymously-raised ticket, which has no userId at all.
+      const orphan = await request(`/tickets/${createdTicket.ticketId}`, { token: adminToken });
+      assert.equal(orphan.status, 200);
+
+      const write = await request(`/tickets/${ownedTicket.ticketId}/status`, {
+        method: "PATCH",
+        token: adminToken,
+        body: { status: "resolved" },
+      });
+      assert.equal(write.status, 200);
+      const json = await write.json();
+      assert.equal(json.data.status, "resolved");
+    });
   },
 );
+

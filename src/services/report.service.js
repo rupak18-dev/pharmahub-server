@@ -242,7 +242,7 @@ function reportBillToSale(rb) {
     paymentStatus: rb.payment?.status || "paid",
     status: "completed",
     source: rb.source || "manual",
-    createdAt: rb.createdAt,
+    createdAt: rb.invoice?.invoiceDate ?? rb.createdAt,
     createdByName: rb.createdByName || "Staff",
   };
 }
@@ -290,7 +290,7 @@ function reportBillToPurchase(rb) {
     documentType: rb.documentType || "purchase_invoice",
     status: "received",
     source: rb.source || "manual",
-    createdAt: rb.createdAt,
+    createdAt: rb.invoice?.invoiceDate ?? rb.createdAt,
     createdByName: rb.createdByName || "Staff",
   };
 }
@@ -637,6 +637,8 @@ const MODULE_CONFIGS = {
   audit: {
     model: AuditLog,
     dateField: "createdAt",
+    ownerScoped: true,
+    ownerField: "userId",
     fields: {
       actionType: (r) => r.action || "Log",
       staff: (r) => r.userName || "User",
@@ -841,7 +843,10 @@ export async function customReport(payload = {}, userId = null) {
   // inverted range is rejected outright. Owner-owned modules are scoped to the
   // signed-in user so uploaded/saved data never leaks across organizations.
   const match = {};
-  if (config.ownerScoped && userId) match.createdBy = userId;
+  if (config.ownerScoped && userId) {
+    const ownerKey = config.ownerField || "createdBy";
+    match[ownerKey] = userId;
+  }
   const from = parseDateParam(dateFrom, "dateFrom");
   const to = parseDateParam(dateTo, "dateTo");
   if (from && to && from.getTime() > to.getTime()) {

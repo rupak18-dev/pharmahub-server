@@ -85,6 +85,11 @@ router.get(
   reportDataController.getReportBillsSummary,
 );
 router.get("/data/bills", authorize("reports", "view"), reportDataController.listReportBills);
+router.post(
+  "/data/seed-demo",
+  authorize("reports", "create"),
+  reportDataController.seedDemoBills,
+);
 router.get("/data/bills/:id", authorize("reports", "view"), reportDataController.getReportBill);
 router.post("/data/bills", authorize("reports", "create"), reportDataController.createReportBill);
 router.post(

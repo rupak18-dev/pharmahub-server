@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 
-import { env } from "../config/env.js";
 import { ApiError } from "../core/ApiError.js";
+import { logger } from "../core/logger.js";
+import { env } from "../config/env.js";
 import { Otp } from "../models/Otp.js";
 import { sendEmail } from "./email.service.js";
 
@@ -27,13 +28,18 @@ function generateCode() {
 /**
  * Generates a 6-digit code for `email`/`purpose`, stores a hash, and emails it.
  * `subject`/`html` override the default email copy; `{{code}}` inside them is
- * replaced with the generated code. Returns `devCode` in non-production so the
- * flow can be tested without an email provider.
+ * replaced with the generated code.
  */
 export async function createAndSendOtp({ email, purpose, subject, html }) {
   const normalizedEmail = email.toLowerCase();
   const existing = await Otp.findOne({ email: normalizedEmail, purpose });
-  if (existing && Date.now() - existing.updatedAt.getTime() < RESEND_COOLDOWN_MS) {
+
+  // Cooldown is throttling against real inbox spam, so it is measured from the
+  // last SUCCESSFUL delivery. Gating it on `updatedAt` meant a failed send also
+  // started the clock, and the user's immediate "Resend code" retry came back
+  // 429 — indistinguishable from the endpoint being broken.
+  const lastSentAt = existing?.lastSentAt ? new Date(existing.lastSentAt) : null;
+  if (lastSentAt && Date.now() - lastSentAt.getTime() < RESEND_COOLDOWN_MS) {
     throw ApiError.tooMany("Please wait a minute before requesting another code");
   }
 
@@ -50,19 +56,45 @@ export async function createAndSendOtp({ email, purpose, subject, html }) {
     { upsert: true },
   );
 
-  const transport = await sendEmail({
+  const sendResult = await sendEmail({
     to: normalizedEmail,
     subject: subject ?? "Your PharmaHub verification code",
     html:
-      html?.replace(/\{\{code\}\}/g, code) ??
+      html
+        ?.replace(/\{\{otp_code\}\}/g, code)
+        .replace(/\{\{code\}\}/g, code) ??
       `<p>Your PharmaHub verification code is:</p>
 <p style="font-size:24px;font-weight:bold;letter-spacing:4px">${code}</p>
 <p>It expires in 10 minutes. If you didn't request this code, you can ignore this email.</p>`,
   });
 
-  return {
-    devCode: env.isProduction || transport === "resend" ? undefined : code,
-  };
+  // Never let a skipped/failed delivery masquerade as a sent code: surface it
+  // loudly so the API response / logs reflect that no email actually went out.
+  if (sendResult?.skipped) {
+    logger.error(
+      `[otp] Code stored for ${normalizedEmail} (${purpose}) but the email was NOT delivered ` +
+        `(reason=${sendResult.reason})` +
+        (sendResult.error ? ` providerError="${sendResult.error}"` : "") +
+        (sendResult.hint ? ` — ${sendResult.hint}` : "") +
+        ". The recipient cannot verify their account until this is fixed.",
+    );
+  } else {
+    // Only a delivered email starts the resend cooldown.
+    await Otp.updateOne(
+      { email: normalizedEmail, purpose },
+      { $set: { lastSentAt: new Date() } },
+    );
+  }
+
+  // Frontend dev contract: when delivery is skipped (no SMTP/Resend), surface
+  // the code as `devCode` so dev flows still work — but ONLY with an explicit
+  // opt-in (EMAIL_DEV_CODE=true), outside production, and never once the code
+  // has actually been emailed to anyone.
+  const skipped = Boolean(sendResult?.skipped);
+  const echoAllowed =
+    env.echoDevCode && (!env.isProduction || env.echoDevCodeInProduction);
+  const devCode = skipped && echoAllowed ? code : undefined;
+  return { skipped, devCode, reason: sendResult?.reason ?? null };
 }
 
 /** Verifies a code for `email`/`purpose` and consumes it once successful. */
