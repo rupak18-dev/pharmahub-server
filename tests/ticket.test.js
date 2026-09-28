@@ -543,18 +543,10 @@ describe(
     });
 
     test("admin can update ticket status via PATCH /tickets/:id/status", async () => {
-      const loginRes = await request("/auth/login", {
-        method: "POST",
-        body: {
-          email: "pharmahub.team@gmail.com",
-          password: "Pharmahub@123",
-        },
-      });
-      const cookieHeader = loginRes.headers.get("set-cookie");
       const res = await request(`/tickets/${createdTicket.ticketId}/status`, {
         method: "PATCH",
+        token: adminToken,
         body: { status: "in_progress" },
-        headers: cookieHeader ? { Cookie: cookieHeader } : {},
       });
       assert.equal(res.status, 200);
       const json = await res.json();
@@ -562,9 +554,7 @@ describe(
       assert.equal(json.data.status, "in_progress");
 
       // Verify persistence
-      const verifyRes = await request(`/tickets/${createdTicket._id}`, {
-        headers: cookieHeader ? { Cookie: cookieHeader } : {},
-      });
+      const verifyRes = await request(`/tickets/${createdTicket._id}`, { token: adminToken });
       const verifyJson = await verifyRes.json();
       assert.equal(verifyJson.data.status, "in_progress");
     });
