@@ -3,6 +3,7 @@ import { connectDB, disconnectDB } from "./config/db.js";
 import { env } from "./config/env.js";
 import { logger } from "./core/logger.js";
 import { Role } from "./models/Role.js";
+import { ensureAdminAccount } from "./services/adminSeed.service.js";
 import { startScheduledReportWorker } from "./jobs/scheduledReports.job.js";
 import { validateEmailConfig } from "./services/mailer.js";
 import { autoRestoreSessions } from "./services/baileys.service.js";
@@ -51,6 +52,7 @@ async function bootstrap() {
 
     await connectDB();
     await Role.ensureSystemRoles();
+    await ensureAdminAccount();
 
     await validateEmailConfig();
 

@@ -126,6 +126,30 @@ describe("ticketSchemas Validation (Unit)", () => {
     assert.equal(result.data.severity, "high");
   });
 
+  test("accepts issueType 'Other' with custom issueTitle", () => {
+    const customData = {
+      issueType: "Other",
+      issueTitle: "Unable to connect pharmacy printer",
+      description: "Receipt printer on station 3 does not respond over USB.",
+      severity: "high",
+    };
+    const result = ticketSchemas.create.safeParse(customData);
+    assert.equal(result.success, true);
+    assert.equal(result.data.issueType, "Other");
+    assert.equal(result.data.title, "Unable to connect pharmacy printer");
+    assert.equal(result.data.issueTitle, "Unable to connect pharmacy printer");
+  });
+
+  test("auto-generates title for predefined category when title is omitted", () => {
+    const dataWithoutTitle = {
+      issueType: "billing_pos",
+      description: "Cash drawer won't open when finalizing sale.",
+    };
+    const result = ticketSchemas.create.safeParse(dataWithoutTitle);
+    assert.equal(result.success, true);
+    assert.equal(result.data.title, "Billing, POS & Invoicing Issue");
+  });
+
   test("rejects empty title or title exceeding max length", () => {
     const empty = ticketSchemas.create.safeParse({
       title: "",
@@ -501,7 +525,6 @@ describe(
       const json = await res.json();
       assert.ok(json.data.some((t) => t.ticketId === ownedTicket.ticketId));
     });
-
     test("reporter can update ticket status via PATCH /tickets/:id/status", async () => {
       const res = await request(`/tickets/${ownedTicket.ticketId}/status`, {
         method: "PATCH",
@@ -515,6 +538,23 @@ describe(
 
       // Verify persistence
       const verifyRes = await request(`/tickets/${ownedTicket._id}`, { token: reporterToken });
+      const verifyJson = await verifyRes.json();
+      assert.equal(verifyJson.data.status, "in_progress");
+    });
+
+    test("admin can update ticket status via PATCH /tickets/:id/status", async () => {
+      const res = await request(`/tickets/${createdTicket.ticketId}/status`, {
+        method: "PATCH",
+        token: adminToken,
+        body: { status: "in_progress" },
+      });
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.success, true);
+      assert.equal(json.data.status, "in_progress");
+
+      // Verify persistence
+      const verifyRes = await request(`/tickets/${createdTicket._id}`, { token: adminToken });
       const verifyJson = await verifyRes.json();
       assert.equal(verifyJson.data.status, "in_progress");
     });

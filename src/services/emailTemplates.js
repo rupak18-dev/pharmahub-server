@@ -531,7 +531,11 @@ const TICKET_ISSUE_TYPE_LABELS = {
   user_access: "User Access, Roles & Permissions",
   reports_export: "Reports, Analytics & Data Export",
   hardware_printers: "Hardware, Printers & Scanner Integration",
+  hardware_integrations: "Integrations & Hardware Setup",
+  system_bug: "System Bug / Technical Error",
   general_inquiry: "General Inquiry or Feature Request",
+  other: "Other",
+  Other: "Other",
 };
 
 export function buildTicketConfirmationEmail({ ticket, link }) {

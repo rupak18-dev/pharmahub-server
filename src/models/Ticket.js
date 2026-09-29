@@ -12,6 +12,17 @@ const ticketActivitySchema = new Schema(
   { _id: true },
 );
 
+const ticketMessageSchema = new Schema(
+  {
+    sender: { type: String, enum: ["admin", "user"], default: "admin" },
+    senderName: { type: String, required: true, trim: true },
+    senderRole: { type: String, default: "Support Team" },
+    message: { type: String, required: true, trim: true },
+    timestamp: { type: Date, default: Date.now },
+  },
+  { _id: true },
+);
+
 const ticketSchema = new Schema(
   {
     ticketId: {
@@ -23,6 +34,7 @@ const ticketSchema = new Schema(
       index: true,
     },
     title: { type: String, required: true, trim: true, maxlength: 250 },
+    issueTitle: { type: String, trim: true, maxlength: 250 },
     issueType: { type: String, required: true, trim: true, index: true },
     description: { type: String, required: true, trim: true },
     severity: {
@@ -32,6 +44,7 @@ const ticketSchema = new Schema(
       index: true,
     },
     screenshot: { type: String, default: null },
+    hasScreenshot: { type: Boolean, default: false },
     status: {
       type: String,
       enum: ["open", "acknowledged", "assigned", "in_progress", "waiting_for_user", "resolved", "closed"],
@@ -46,6 +59,10 @@ const ticketSchema = new Schema(
     confirmationEmailSent: { type: Boolean, default: false },
     activityTimeline: {
       type: [ticketActivitySchema],
+      default: [],
+    },
+    messages: {
+      type: [ticketMessageSchema],
       default: [],
     },
   },

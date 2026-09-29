@@ -39,4 +39,16 @@ router.patch(
   ticketController.updateTicketStatus,
 );
 
+router.post(
+  "/:id/reply",
+  auth,
+  ticketController.replyTicket,
+);
+
+router.post(
+  "/:id/activity",
+  auth,
+  ticketController.addTicketActivity,
+);
+
 export default router;
