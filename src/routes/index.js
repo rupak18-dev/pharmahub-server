@@ -17,14 +17,20 @@ import auditRoutes from "./audit.routes.js";
 import notificationRoutes from "./notification.routes.js";
 import reportRoutes from "./report.routes.js";
 import dashboardRoutes from "./dashboard.routes.js";
+import integrationRoutes from "./integration.routes.js";
+import ticketRoutes from "./ticket.routes.js";
+import supportRoutes from "./support.routes.js";
 
 const router = Router();
 
 router.use("/", healthRoutes);
+
 router.use("/auth", authRoutes);
 router.use("/onboarding", onboardingRoutes);
+
 router.use("/users", userRoutes);
 router.use("/roles", roleRoutes);
+
 router.use("/categories", categoryRoutes);
 router.use("/manufacturers", manufacturerRoutes);
 router.use("/suppliers", supplierRoutes);
@@ -33,9 +39,14 @@ router.use("/batches", batchRoutes);
 router.use("/inventory", inventoryRoutes);
 router.use("/purchases", purchaseRoutes);
 router.use("/sales", saleRoutes);
+
 router.use("/audit", auditRoutes);
 router.use("/notifications", notificationRoutes);
+
 router.use("/reports", reportRoutes);
 router.use("/dashboard", dashboardRoutes);
+router.use("/integrations", integrationRoutes);
+router.use("/tickets", ticketRoutes);
+router.use("/support", supportRoutes);
 
 export default router;

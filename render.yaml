@@ -15,3 +15,20 @@ services:
         sync: false
       - key: JWT_SECRET
         generateValue: true
+      - key: CORS_ORIGIN
+        value: "https://pharmahub-co.vercel.app"
+      - key: FRONTEND_URL
+        value: "https://pharmahub-co.vercel.app"
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      # Email delivery via Resend. sync: false keeps the value out of git — set
+      # both in the Render dashboard. EMAIL_FROM MUST be a domain you have added
+      # and verified in the Resend dashboard; the onboarding@resend.dev default
+      # can only deliver to your own account address, so verification and
+      # invitation emails would be silently rejected.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false

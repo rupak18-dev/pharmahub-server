@@ -3,48 +3,30 @@ import crypto from "node:crypto";
 import { asyncHandler } from "../core/asyncHandler.js";
 import { ok, created } from "../core/responses.js";
 import { logger } from "../core/logger.js";
+import { ApiError } from "../core/ApiError.js";
 import { env } from "../config/env.js";
-import { User } from "../models/User.js";
 import {
   loginUser,
   registerUser,
   changePassword,
-  updateProfile,
-  toPublicUser,
+  toAuthUser,
   setSessionCookie,
   clearSessionCookie,
-  signInWithGoogle,
-  signUpWithGoogle,
+  issueToken,
+  resetPassword as resetPasswordService,
 } from "../services/auth.service.js";
-import { googleAuthUrl, exchangeCodeForProfile } from "../services/googleAuth.service.js";
+import {
+  googleAuthUrl,
+  exchangeCodeForProfile,
+} from "../services/googleAuth.service.js";
+import { createAndSendOtp, verifyOtp } from "../services/otp.service.js";
+import { buildVerificationEmail } from "../services/emailTemplates.js";
 import { recordAudit } from "../services/audit.service.js";
-
-const STATE_COOKIE_MAX_AGE_MS = 10 * 60 * 1000;
-
-// FRONTEND_URL is often configured with a trailing slash (or defaulted to one),
-// which would turn `/auth/callback` into `//auth/callback` and 404 in the SPA.
-function frontendUrlBase() {
-  return String(env.google.frontendUrl ?? "").replace(/\/+$/, "");
-}
-
-function googleStateCookieOptions() {
-  return {
-    httpOnly: true,
-    secure: env.cookie.secure,
-    sameSite: env.cookie.sameSite,
-    path: "/",
-    maxAge: STATE_COOKIE_MAX_AGE_MS,
-  };
-}
-
-function googleCallbackRedirect({ token, user }) {
-  const userParam = encodeURIComponent(Buffer.from(JSON.stringify(user)).toString("base64url"));
-  return `${frontendUrlBase()}/auth/callback#token=${encodeURIComponent(token)}&user=${userParam}`;
-}
+import { computeProfileCompletion } from "../services/profileCompletion.service.js";
+import { User } from "../models/User.js";
 
 export const register = asyncHandler(async (req, res) => {
   const result = await registerUser(req.body);
-  setSessionCookie(res, result.token);
   recordAudit({
     userId: result.user?.id,
     userName: result.user?.name,
@@ -53,12 +35,40 @@ export const register = asyncHandler(async (req, res) => {
     entityId: result.user?.id,
     ip: req.ip,
   });
-  return created(res, result, "Registration successful. Welcome to PharmaHub!");
+
+  // Email an unverified-code check before the account can be used. The
+  // {{otp_code}} placeholder is replaced by otp.service once the code is minted.
+  const verification = buildVerificationEmail({
+    name: result.user?.name,
+    code: "{{otp_code}}",
+    expiresInMinutes: 10,
+    verifyUrl: `${env.frontendUrl}/verify-email`,
+  });
+  const delivery = await createAndSendOtp({
+    email: result.user.email,
+    purpose: "email_verify",
+    subject: verification.subject,
+    html: verification.html,
+  });
+
+  // No session cookie is issued: the new account is unverified and must prove
+  // the inbox before first sign-in (see loginUser gate). The OTP ships only in
+  // the email — it is never echoed back to the client... except the dev-only
+  // `devCode` surface when email delivery is NOT configured (nothing was sent).
+  const skipMessage =
+    delivery?.reason === "delivery_failed"
+      ? "Registration successful, but the verification email failed to send. Check your email provider and try 'Resend code'."
+      : "Registration successful, but email delivery is not configured — the verification code was not emailed.";
+  return created(
+    res,
+    { user: result.user, devCode: delivery?.devCode, emailReason: delivery?.reason ?? null },
+    delivery?.skipped ? skipMessage : "Registration successful. Check your email for the verification code.",
+  );
 });
 
 export const login = asyncHandler(async (req, res) => {
   const result = await loginUser(req.body);
-  setSessionCookie(res, result.token);
+  setSessionCookie(res, result.token, { remember: req.body.remember ?? true });
   recordAudit({
     userId: result.user.id,
     userName: result.user.name,
@@ -67,16 +77,45 @@ export const login = asyncHandler(async (req, res) => {
     entityId: result.user.id,
     ip: req.ip,
   });
-  return ok(res, result, "Login successful");
+  // Session JWT travels as an httpOnly cookie — never in the response body.
+  return ok(res, { user: result.user }, "Login successful");
+});
+
+
+// GET /auth/me — returns the current user with full effective permissions and
+// profile completion score. Delegates to the same enrichment logic used by
+// GET /users/me so the frontend always gets a consistent user shape.
+export const me = asyncHandler(async (req, res) => {
+  // Identity must never be served from any HTTP cache — a cached response
+  // could return the PREVIOUS user after a logout + different login.
+  res.set("Cache-Control", "no-store");
+  const user = await User.findById(req.user._id).lean();
+  if (!user) {
+    // Middleware already verified the user exists; this is a safety fallback.
+    logger.warn(`[auth.me] token userId=${req.user._id} not found in database`);
+    const publicUser = await toAuthUser(req.user);
+    publicUser.profileCompletion = computeProfileCompletion(req.user);
+    return ok(res, publicUser, "Current user");
+  }
+  logger.info(
+    `[auth.me] session userId=${user._id} email=${user.email} role=${user.role}`,
+  );
+  const publicUser = await toAuthUser(user);
+  publicUser.profileCompletion = computeProfileCompletion(user);
+  return ok(res, publicUser, "Current user");
 });
 
 export const logout = asyncHandler(async (req, res) => {
   clearSessionCookie(res);
-  return ok(res, null, "Signed out");
-});
-
-export const me = asyncHandler(async (req, res) => {
-  return ok(res, toPublicUser(req.user), "Current user");
+  recordAudit({
+    userId: req.user?._id,
+    userName: req.user?.name,
+    action: "User signed out",
+    entityType: "user",
+    entityId: req.user?._id,
+    ip: req.ip,
+  });
+  return ok(res, null, "Logged out");
 });
 
 export const updatePassword = asyncHandler(async (req, res) => {
@@ -84,86 +123,234 @@ export const updatePassword = asyncHandler(async (req, res) => {
   return ok(res, null, "Password updated");
 });
 
-export const updateMyProfile = asyncHandler(async (req, res) => {
-  const user = await updateProfile(req.user._id, req.body);
-  recordAudit({
-    userId: user.id,
-    userName: user.name,
-    action: "User profile updated",
-    entityType: "user",
-    entityId: user.id,
-    ip: req.ip,
-  });
-  return ok(res, user, "Profile updated");
+export const forgotPassword = asyncHandler(async (req, res) => {
+  const email = req.body.email.toLowerCase();
+  const user = await User.findOne({ email })
+    .collation({ locale: "en", strength: 2 })
+    .select("_id active")
+    .lean();
+  if (user?.active) {
+    await createAndSendOtp({
+      email,
+      purpose: "password_reset",
+      subject: "Reset your PharmaHub password",
+      html: `<p>We received a request to reset your PharmaHub password. Enter this code to continue:</p>
+<p style="font-size:24px;font-weight:bold;letter-spacing:4px">{{code}}</p>
+<p>The code expires in 10 minutes. If you didn't request a reset, you can ignore this email.</p>`,
+    });
+  }
+  // Same response whether or not the account exists — no account enumeration.
+  return ok(res, null, "If that email belongs to an account, a reset code is on its way.");
 });
 
+export const resetPassword = asyncHandler(async (req, res) => {
+  const userId = await resetPasswordService(req.body);
+  recordAudit({
+    userId,
+    action: "Password reset via email code",
+    entityType: "user",
+    entityId: userId,
+    ip: req.ip,
+  });
+  return ok(res, null, "Password updated. You can sign in with your new password.");
+});
+
+// POST /auth/verify-email — public (pre-login). Consumes the emailed code and
+// flips the account to verified. Reusing the OTP service keeps brute-force
+// protection (5 attempts, 10-min expiry, one-time consumption).
+export const verifyEmail = asyncHandler(async (req, res) => {
+  const email = req.body.email.toLowerCase();
+  await verifyOtp({ email, purpose: "email_verify", code: req.body.code });
+
+  const user = await User.findOne({ email }).collation({ locale: "en", strength: 2 });
+  if (!user) throw ApiError.badRequest("No account found for this email");
+
+  let justVerified = false;
+  if (user.emailVerified !== true) {
+    user.emailVerified = true;
+    user.emailVerifiedAt = new Date();
+    user.active = true;
+    await user.save();
+    justVerified = true;
+    recordAudit({
+      userId: user._id,
+      userName: user.name,
+      action: "Email address verified",
+      entityType: "user",
+      entityId: user._id,
+      ip: req.ip,
+    });
+  }
+  return ok(
+    res,
+    { emailVerified: true, emailVerifiedAt: user.emailVerifiedAt, justVerified },
+    justVerified ? "Email verified. You can now sign in." : "This email is already verified.",
+  );
+});
+
+// POST /auth/resend-verification — public (pre-login). Always answers with the
+// same message whether or not an account exists, so the endpoint cannot be used
+// to enumerate which emails are registered.
+export const resendVerification = asyncHandler(async (req, res) => {
+  const email = req.body.email.toLowerCase();
+  const user = await User.findOne({ email })
+    .collation({ locale: "en", strength: 2 })
+    .select("_id name active emailVerified")
+    .lean();
+
+  let devCode;
+  if (user?.active && user.emailVerified === false) {
+    const verification = buildVerificationEmail({
+      name: user.name,
+      code: "{{otp_code}}",
+      expiresInMinutes: 10,
+      verifyUrl: `${env.frontendUrl}/verify-email`,
+    });
+    const delivery = await createAndSendOtp({
+      email,
+      purpose: "email_verify",
+      subject: verification.subject,
+      html: verification.html,
+    });
+    devCode = delivery?.devCode;
+    // The response below is intentionally identical whether or not the account
+    // exists, so a delivery failure cannot be reported in the body without
+    // turning this endpoint into an account-enumeration oracle. Log it hard
+    // instead — this is the only place a "resend does nothing" bug is visible.
+    if (delivery?.skipped) {
+      logger.error(
+        `[auth.resendVerification] code generated for ${email} but delivery FAILED ` +
+          `(reason=${delivery.reason})` +
+          (delivery.error ? ` providerError="${delivery.error}"` : "") +
+          (delivery.hint ? ` — ${delivery.hint}` : "") +
+          ". The client still received 200, so this log line is the only signal.",
+      );
+    }
+  }
+  // Same response message whether or not the account exists — no account
+  // enumeration. The dev-only `devCode` (present only when delivery is skipped,
+  // i.e. nothing was emailed) does not reveal account existence on its own.
+  return ok(
+    res,
+    devCode ? { devCode } : null,
+    "If that email is registered and unverified, a new code is on its way.",
+  );
+});
+
+// PUT /auth/profile — convenience alias for PUT /users/me/profile so the
+// frontend auth service does not need to know about the /users prefix.
+export { updateMyProfile } from "./user.controller.js";
+
+// ── Google sign-in (OAuth 2.0) ───────────────────────────────────────────────
+// The browser is redirected to the backend, which sets the session as an
+// httpOnly cookie before bouncing back to the SPA — no token in any URL.
+const OAUTH_STATE_COOKIE = env.google.stateCookieName ?? "google_oauth_state";
+const OAUTH_STATE_MAX_AGE_MS = 10 * 60 * 1000;
+
+// Redirect target handed back to the SPA after a Google flow finishes
+// (successfully or not). The session itself is set as an httpOnly cookie by
+// the callback before redirecting, so no token ever appears in the URL.
+function googleResultRedirect({ error } = {}) {
+  const suffix = error ? `?error=${encodeURIComponent(error)}` : "";
+  return `${env.frontendUrl}/auth/callback${suffix}`;
+}
+
+// GET /auth/google — kicks off the consent redirect with a CSRF state cookie.
+// The state value is opaque but HMAC-signed so a forged cookie (e.g. via a
+// subdomain cookie setter) can never produce a matching signature.
+function signGoogleState(value) {
+  return `${value}.${crypto
+    .createHmac("sha256", env.jwtSecret)
+    .update(value)
+    .digest("hex")}`;
+}
+
+function verifyGoogleState(state) {
+  if (typeof state !== "string") return null;
+  const lastDot = state.lastIndexOf(".");
+  if (lastDot <= 0) return null;
+  const value = state.slice(0, lastDot);
+  const sig = state.slice(lastDot + 1);
+  const expected = crypto.createHmac("sha256", env.jwtSecret).update(value).digest("hex");
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b) ? value : null;
+}
+
 export const googleStart = asyncHandler(async (req, res) => {
-  const state = crypto.randomBytes(24).toString("hex");
-  res.cookie(env.google.stateCookieName, state, googleStateCookieOptions());
+  const state = signGoogleState(crypto.randomBytes(16).toString("hex"));
+  res.cookie(OAUTH_STATE_COOKIE, state, {
+    httpOnly: true,
+    sameSite: env.cookie.sameSite,
+    secure: env.cookie.secure,
+    maxAge: OAUTH_STATE_MAX_AGE_MS,
+  });
   return res.redirect(googleAuthUrl(state));
 });
 
-function googleFailRedirect(reason, err) {
-  logger.error(`Google sign-in failed (${reason})`, err);
-  const params = new URLSearchParams({ google: "error" });
-  if (!env.isProduction && reason) params.set("reason", reason);
-  return `${frontendUrlBase()}/login?${params.toString()}`;
-}
-
+// GET /auth/google/callback — verifies state, exchanges the code for a Google
+// profile, links or provisions the local account, then redirects to the SPA
+// with the session token. Every failure lands back on /auth/callback without a
+// token so the frontend shows its standard retry message.
 export const googleCallback = asyncHandler(async (req, res) => {
-  const { code, state, error } = req.query;
+  const expectedState = verifyGoogleState(req.cookies?.[OAUTH_STATE_COOKIE]);
+  const suppliedState = verifyGoogleState(req.query.state);
+  res.clearCookie(OAUTH_STATE_COOKIE);
 
-  res.clearCookie(env.google.stateCookieName, googleStateCookieOptions());
-  if (error || !code) {
-    return res.redirect(googleFailRedirect(error ? `google:${error}` : "missing_code"));
+  if (!expectedState || !suppliedState || suppliedState !== expectedState) {
+    return res.redirect(googleResultRedirect({ error: "google_state_mismatch" }));
   }
 
-  const expectedState = req.cookies?.[env.google.stateCookieName];
-  if (!expectedState || !state || expectedState !== state) {
-    logger.error("Google state cookie mismatch", {
-      hasCookie: Boolean(expectedState),
-      hasQueryState: Boolean(state),
-      cookieValue: expectedState ?? null,
-      queryValue: state ?? null,
-    });
-    return res.redirect(googleFailRedirect("state_mismatch"));
-  }
-
+  let profile;
   try {
-    const profile = await exchangeCodeForProfile(code);
+    profile = await exchangeCodeForProfile(String(req.query.code ?? ""));
+  } catch {
+    return res.redirect(googleResultRedirect({ error: "google_exchange_failed" }));
+  }
 
-    const existing = await User.findOne({ email: profile.email }).collation({
+  // Link by Google id first, then by verified email (case-insensitive).
+  let user =
+    (profile.googleId && (await User.findOne({ googleId: profile.googleId }))) ||
+    (await User.findOne({ email: profile.email }).collation({
       locale: "en",
       strength: 2,
-    });
-    if (existing) {
-      const result = await signInWithGoogle(profile);
-      setSessionCookie(res, result.token);
-      recordAudit({
-        userId: result.user.id,
-        userName: result.user.name,
-        action: "User signed in with Google",
-        entityType: "user",
-        entityId: result.user.id,
-        ip: req.ip,
-      });
-      return res.redirect(googleCallbackRedirect(result));
-    }
+    }));
 
-    // Brand-new Google email → create the account directly; Google has already
-    // verified ownership of the email.
-    const result = await signUpWithGoogle(profile);
-    setSessionCookie(res, result.token);
-    recordAudit({
-      userId: result.user.id,
-      userName: result.user.name,
-      action: "User signed up with Google",
-      entityType: "user",
-      entityId: result.user.id,
-      ip: req.ip,
-    });
-    return res.redirect(googleCallbackRedirect(result));
-  } catch (err) {
-    return res.redirect(googleFailRedirect("token_exchange", err));
+  if (user && user.status === "removed") {
+    return res.redirect(googleResultRedirect({ error: "google_account_removed" }));
   }
+
+  if (!user) {
+    // Self-provisioning path — new Google accounts stay role-less (neutral)
+    // until the Owner explicitly assigns a role. Never a silent default.
+    user = await User.create({
+      name: profile.name,
+      email: profile.email,
+      orgName: "PharmaHub Pharmacy",
+      provider: "google",
+      googleId: profile.googleId,
+      picture: profile.picture,
+      active: true,
+      status: "active",
+    });
+  } else if (!user.googleId || user.provider !== "google") {
+    user.googleId = profile.googleId;
+    user.provider = "google";
+  }
+  if (user.picture !== profile.picture) user.picture = profile.picture;
+  await user.save();
+
+  recordAudit({
+    userId: user._id,
+    userName: user.name,
+    action: "User signed in with Google",
+    entityType: "user",
+    entityId: user._id,
+    ip: req.ip,
+  });
+
+  const token = issueToken(user._id);
+  // Session travels as an httpOnly cookie; the SPA hydrates via GET /auth/me.
+  setSessionCookie(res, token);
+  return res.redirect(googleResultRedirect({}));
 });

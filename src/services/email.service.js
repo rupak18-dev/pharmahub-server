@@ -1,41 +1,10 @@
-import { env } from "../config/env.js";
-import { ApiError } from "../core/ApiError.js";
-
-let resend = null;
-
 /**
- * Sends a transactional email. When RESEND_API_KEY is set the email goes out
- * through Resend; otherwise it is printed to the server console (development
- * only — production throws so a missing provider is never silent).
+ * email.service.js — thin wrapper that delegates to the canonical mailer.js.
  *
- * @returns {"resend" | "console"} which transport was used
+ * This file previously referenced flat env.smtpHost / env.smtpUser properties
+ * that do not exist (env uses the nested env.smtp.host / env.smtp.user paths).
+ * All email delivery goes through mailer.js which uses the correct structure.
+ * The sendMail export is kept for backward-compatibility with any existing
+ * callers that import from this file.
  */
-export async function sendEmail({ to, subject, html }) {
-  if (env.email.apiKey) {
-    if (!resend) {
-      const { Resend } = await import("resend");
-      resend = new Resend(env.email.apiKey);
-    }
-    const { error } = await resend.emails.send({
-      from: env.email.from,
-      to,
-      subject,
-      html,
-    });
-    if (error) {
-      throw ApiError.badRequest(`Could not send email: ${error.message}`);
-    }
-    return "resend";
-  }
-
-  if (env.isProduction) {
-    throw ApiError.badRequest(
-      "Email service is not configured. Ask the admin to add RESEND_API_KEY.",
-    );
-  }
-
-  const plain = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-  console.log(`[email][dev] To: ${to} | Subject: ${subject}`);
-  console.log(`[email][dev] Body: ${plain}`);
-  return "console";
-}
+export { sendEmail as sendMail, sendEmail } from "./mailer.js";

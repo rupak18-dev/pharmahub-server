@@ -1,8 +1,20 @@
+import { env } from "./env.js";
+
 export const constants = {
   app: {
     name: "PharmaHub",
     version: "1.0.0",
     apiPrefix: "/api/v1",
+  },
+
+  development: {
+    demoOwner: {
+      name: "PharmaHub Demo Owner",
+      email: "demo@pharmahub.local",
+      password: env.devDemoPassword,
+      role: "Owner",
+      orgName: "PharmaHub",
+    },
   },
 
   limits: {
@@ -40,20 +52,54 @@ export const constants = {
 
   roles: ["Owner", "Admin", "Pharmacist", "Cashier", "Store Keeper", "Inventory Manager"],
 
+  security: {
+    invitationTtlHours: 24,
+    invitationTtlMs: 24 * 60 * 60 * 1000,
+  },
+
+  // Permission modules mirror the app sidebar exactly (same keys, same
+  // order): Home, Stock Management, Purchase & Trades, Analytics, Access
+  // Management. `modules` drives permission matrices; `accessModules` drives
+  // the per-user access whitelist. Keep both in sync with the sidebar.
+  //
+  // `inventory` and `notifications` were missing here while
+  // /inventory/* and /notifications/* routes already guarded on them. Because
+  // this list builds the default permission matrix, the two keys could never
+  // exist in a role's permissions, so `authorize()` looked them up, found
+  // undefined and threw 403 — every one of those endpoints was silently
+  // Owner-only. Any module a route passes to `authorize()` MUST be listed here.
   modules: [
     "dashboard",
     "medicines",
     "batches",
     "inventory",
+    "expiry",
+    "notifications",
+    "audit",
     "purchases",
     "sales",
-    "expiry",
-    "audit",
-    "users",
+    "shortbook",
     "reports",
-    "notifications",
-    "ai",
+    "users",
     "admin",
+    "integrations",
+  ],
+
+  accessModules: [
+    "dashboard",
+    "medicines",
+    "batches",
+    "inventory",
+    "expiry",
+    "notifications",
+    "audit",
+    "purchases",
+    "sales",
+    "shortbook",
+    "reports",
+    "users",
+    "admin",
+    "integrations",
   ],
 
   actions: ["view", "create", "update", "delete", "approve", "export"],

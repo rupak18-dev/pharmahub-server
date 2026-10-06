@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
 
+import { randomUUID } from "node:crypto";
 import { connectDB, disconnectDB } from "../src/config/db.js";
 import { Category } from "../src/models/Category.js";
 import { Manufacturer } from "../src/models/Manufacturer.js";
@@ -37,9 +37,24 @@ const manufacturers = [
 ];
 
 const suppliers = [
-  { name: "MedSupply Co.", contactInfo: "orders@medsupply.example", gstNumber: "27ABCDE1234F1Z5", paymentTerms: "Net 30" },
-  { name: "HealthDist Ltd.", contactInfo: "orders@healthdist.example", gstNumber: "29PQRST9876G2Z9", paymentTerms: "Net 15" },
-  { name: "CureWell Distributors", contactInfo: "orders@curewell.example", gstNumber: "24GHIJK5678H3X4", paymentTerms: "Net 30" },
+  {
+    name: "MedSupply Co.",
+    contactInfo: "orders@medsupply.example",
+    gstNumber: "27ABCDE1234F1Z5",
+    paymentTerms: "Net 30",
+  },
+  {
+    name: "HealthDist Ltd.",
+    contactInfo: "orders@healthdist.example",
+    gstNumber: "29PQRST9876G2Z9",
+    paymentTerms: "Net 15",
+  },
+  {
+    name: "CureWell Distributors",
+    contactInfo: "orders@curewell.example",
+    gstNumber: "24GHIJK5678H3X4",
+    paymentTerms: "Net 30",
+  },
 ];
 
 const seedMedicines = [
@@ -171,6 +186,8 @@ const seedMedicines = [
   },
 ];
 
+const stockPattern = [180, 96, 42, 210, 75, 160, 110];
+
 async function run() {
   await connectDB();
 
@@ -233,9 +250,22 @@ async function run() {
     medDocs.push(med);
   }
 
-  const stockPattern = [180, 96, 42, 210, 75, 160, 110];
-  const locationPool = ["Front Shelf", "Front Shelf", "Backroom", "Cold Storage", "Front Shelf", "Backroom"];
-  const rackPool = ["Aisle A, Shelf 1", "Aisle A, Shelf 2", "Backroom Rack 1", "Cold Room 1", "Aisle B, Shelf 1", "Backroom Rack 2"];
+  const locationPool = [
+    "Front Shelf",
+    "Front Shelf",
+    "Backroom",
+    "Cold Storage",
+    "Front Shelf",
+    "Backroom",
+  ];
+  const rackPool = [
+    "Aisle A, Shelf 1",
+    "Aisle A, Shelf 2",
+    "Backroom Rack 1",
+    "Cold Room 1",
+    "Aisle B, Shelf 1",
+    "Backroom Rack 2",
+  ];
 
   let batchCount = 0;
   for (let i = 0; i < medDocs.length; i += 1) {
@@ -246,46 +276,19 @@ async function run() {
     const healthy = await Batch.create({
       medicineId: med._id,
       batchNumber: `${med.prefix}-${String(new Date().getFullYear()).slice(-2)}01-${String(i + 1).padStart(2, "0")}`,
-      batchType: "C",
-      dates: {
-        manufacturingDate: daysFromNow(-180),
-        expiryDate: daysFromNow(365 + i * 20),
-        quarantineUntil: null,
-      },
-      pricing: {
-        purchasePrice: 25 + i * 10,
-        mrp: 40 + i * 15,
-        sellingPrice: 38 + i * 14,
-        gstRate: med.gstRate ?? 12,
-      },
-      status: { isRecalled: false, state: "ACTIVE", quarantineReason: null },
-      stock: {
-        uom: "Units",
-        quantityOnHand: stockQty,
-        reservedQuantity: 0,
-        quarantined: 0,
-      },
-      warehouse: {
-        locationType: locationPool[i % locationPool.length],
-        rackCode: rackPool[i % rackPool.length],
-      },
+      mfgDate: daysFromNow(-180),
+      expiryDate: daysFromNow(365 + i * 20),
+      mrp: 40 + i * 15,
+      purchasePrice: 25 + i * 10,
+      sellingPrice: 38 + i * 14,
       supplierId: supplier,
-      audit: { createdAt: new Date(), updatedAt: new Date(), updatedBy: "seed" },
-      version: 1,
-      movements: [
-        {
-          id: randomUUID(),
-          type: "created",
-          note: "Batch seeded",
-          qty: stockQty,
-          timestamp: new Date(),
-          by: "seed",
-        },
-      ],
+      currentStock: stockQty,
+      status: "active",
     });
     batchCount += 1;
 
-    await Batch.create({
+    const secondQty = Math.max(0, Math.round(stockQty / 3));
+    const secondBatch = await Batch.create({
       medicineId: med._id,
       batchNumber: `${med.prefix}-${String(new Date().getFullYear()).slice(-2)}02-${String(i + 1).padStart(2, "0")}`,
       batchType: "C",
@@ -303,7 +306,7 @@ async function run() {
       status: { isRecalled: false, state: "ACTIVE", quarantineReason: null },
       stock: {
         uom: "Units",
-        quantityOnHand: Math.max(0, Math.round(stockQty / 3)),
+        quantityOnHand: secondQty,
         reservedQuantity: 0,
         quarantined: 0,
       },
@@ -319,7 +322,7 @@ async function run() {
           id: randomUUID(),
           type: "created",
           note: "Batch seeded",
-          qty: Math.max(0, Math.round(stockQty / 3)),
+          qty: secondQty,
           timestamp: new Date(),
           by: "seed",
         },
@@ -332,6 +335,14 @@ async function run() {
       locationType: locationPool[i % locationPool.length],
       rackCode: rackPool[i % rackPool.length],
       quantityOnHand: stockQty,
+      reservedQuantity: 0,
+    });
+
+    await InventoryItem.create({
+      batchId: secondBatch._id,
+      locationType: locationPool[(i + 1) % locationPool.length],
+      rackCode: rackPool[(i + 1) % rackPool.length],
+      quantityOnHand: secondQty,
       reservedQuantity: 0,
     });
   }

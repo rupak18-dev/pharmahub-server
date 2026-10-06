@@ -1,0 +1,581 @@
+import { test, before, after, describe } from "node:test";
+import assert from "node:assert/strict";
+import mongoose from "mongoose";
+
+import { createApp } from "../src/app.js";
+import { env } from "../src/config/env.js";
+import { Ticket } from "../src/models/Ticket.js";
+import { User } from "../src/models/User.js";
+import { generateTicketId } from "../src/controllers/ticket.controller.js";
+import { issueToken } from "../src/services/auth.service.js";
+import { ticketSchemas } from "../src/types/index.js";
+import { buildTicketConfirmationEmail } from "../src/services/emailTemplates.js";
+
+import { setServers } from "node:dns";
+
+const uri = process.env.MONGO_URI_TEST ?? env.mongoUri;
+let connected = false;
+
+try {
+  await mongoose.connect(uri, { serverSelectionTimeoutMS: 4000 });
+  connected = true;
+} catch (err) {
+  if (err?.message?.includes("ECONNREFUSED") || err?.code === "ECONNREFUSED") {
+    try {
+      setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);
+      await mongoose.connect(uri, { serverSelectionTimeoutMS: 8000 });
+      connected = true;
+    } catch (retryErr) {
+      console.log(`[test] MongoDB unavailable (${retryErr?.message ?? retryErr}); Ticket integration tests skipped`);
+    }
+  } else {
+    console.log(`[test] MongoDB unavailable (${err?.message ?? err}); Ticket integration tests skipped`);
+  }
+}
+
+let server;
+let base;
+let testUserIds = [];
+
+before(async () => {
+  if (!connected) return;
+  const app = createApp();
+  server = app.listen(0);
+  await new Promise((resolve) => server.once("listening", resolve));
+  base = `http://127.0.0.1:${server.address().port}`;
+});
+
+after(async () => {
+  if (server) await new Promise((resolve) => server.close(resolve));
+  if (connected) {
+    await Ticket.deleteMany({ title: { $regex: /^Test ticket/i } });
+    if (testUserIds.length > 0) {
+      await User.deleteMany({ _id: { $in: testUserIds } });
+    }
+    await mongoose.disconnect();
+  }
+});
+
+async function request(path, { method = "GET", body, token, headers = {} } = {}) {
+  return fetch(`${base}/api/v1${path}`, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "X-PharmaHub-Client": "web",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...headers,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+/**
+ * Creates an active user directly in the database and returns a signed JWT for
+ * them. Registering through the API would also mean driving the OTP verification
+ * flow, which these tests are not about — the point here is exercising the
+ * ticket authorization rules, not the signup path.
+ */
+async function createTestUser({ name, email, role = "" }) {
+  const user = await User.create({ name, email, role, emailVerified: true, status: "active" });
+  testUserIds.push(user._id);
+  return { user, token: issueToken(user._id) };
+}
+
+describe("ticketSchemas Validation (Unit)", () => {
+  test("accepts valid ticket creation payload", () => {
+    const validData = {
+      title: "Barcode scanner not reading batch QR code",
+      issueType: "medicines_batches",
+      description: "Scanner beeps when scanning Paracetamol 500mg batch PH-2408-01, but no line item is added to the cart.",
+      severity: "high",
+      screenshot: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      userName: "Satya Prakash",
+      userEmail: "satya@pharmacy.com",
+      userRole: "Pharmacist",
+      orgName: "Apollo Pharmacy",
+    };
+    const result = ticketSchemas.create.safeParse(validData);
+    assert.equal(result.success, true);
+    assert.equal(result.data.severity, "high");
+  });
+
+  test("defaults severity to medium if omitted and accepts omitted screenshot", () => {
+    const data = {
+      title: "General inquiry on report exports",
+      issueType: "reports_export",
+      description: "How do we export monthly tax reports to CSV?",
+    };
+    const result = ticketSchemas.create.safeParse(data);
+    assert.equal(result.success, true);
+    assert.equal(result.data.severity, "medium");
+    assert.equal(result.data.screenshot, undefined);
+  });
+
+  test("maps aliases (subject, category, message, priority) and normalizes severity casing", () => {
+    const aliasedData = {
+      subject: "Help with invoice print format",
+      category: "billing_pos",
+      message: "The printer paper is getting cut off on the right margin.",
+      priority: "HIGH",
+    };
+    const result = ticketSchemas.create.safeParse(aliasedData);
+    assert.equal(result.success, true);
+    assert.equal(result.data.title, "Help with invoice print format");
+    assert.equal(result.data.issueType, "billing_pos");
+    assert.equal(result.data.description, "The printer paper is getting cut off on the right margin.");
+    assert.equal(result.data.severity, "high");
+  });
+
+  test("accepts issueType 'Other' with custom issueTitle", () => {
+    const customData = {
+      issueType: "Other",
+      issueTitle: "Unable to connect pharmacy printer",
+      description: "Receipt printer on station 3 does not respond over USB.",
+      severity: "high",
+    };
+    const result = ticketSchemas.create.safeParse(customData);
+    assert.equal(result.success, true);
+    assert.equal(result.data.issueType, "Other");
+    assert.equal(result.data.title, "Unable to connect pharmacy printer");
+    assert.equal(result.data.issueTitle, "Unable to connect pharmacy printer");
+  });
+
+  test("auto-generates title for predefined category when title is omitted", () => {
+    const dataWithoutTitle = {
+      issueType: "billing_pos",
+      description: "Cash drawer won't open when finalizing sale.",
+    };
+    const result = ticketSchemas.create.safeParse(dataWithoutTitle);
+    assert.equal(result.success, true);
+    assert.equal(result.data.title, "Billing, POS & Invoicing Issue");
+  });
+
+  test("rejects empty title or title exceeding max length", () => {
+    const empty = ticketSchemas.create.safeParse({
+      title: "",
+      issueType: "general_inquiry",
+      description: "Description is long enough here",
+    });
+    assert.equal(empty.success, false);
+
+    const long = ticketSchemas.create.safeParse({
+      title: "a".repeat(251),
+      issueType: "general_inquiry",
+      description: "Description is long enough here",
+    });
+    assert.equal(long.success, false);
+  });
+
+  test("rejects empty description or description exceeding max length", () => {
+    const empty = ticketSchemas.create.safeParse({
+      title: "Valid title",
+      issueType: "general_inquiry",
+      description: "",
+    });
+    assert.equal(empty.success, false);
+
+    const long = ticketSchemas.create.safeParse({
+      title: "Valid title",
+      issueType: "general_inquiry",
+      description: "a".repeat(5001),
+    });
+    assert.equal(long.success, false);
+  });
+
+  test("rejects invalid severity value", () => {
+    const invalid = ticketSchemas.create.safeParse({
+      title: "Valid title",
+      issueType: "general_inquiry",
+      description: "Valid description here",
+      severity: "super-critical",
+    });
+    assert.equal(invalid.success, false);
+  });
+});
+
+describe("Ticket Email Notification (Unit)", () => {
+  test("builds professional confirmation email with ticket ID, description, SLA, and links", () => {
+    const ticket = {
+      ticketId: "PH-TKT-2026-98765",
+      title: "Barcode scanner not reading Paracetamol QR",
+      issueType: "medicines_batches",
+      description: "Scanner beeps but does not add item to POS cart. Checked USB cable and device drivers.",
+      severity: "high",
+      status: "open",
+      userName: "Rupak Sharma",
+      userEmail: "rupak@pharmahub.co",
+      createdAt: new Date("2026-09-13T10:30:00.000Z"),
+    };
+
+    const email = buildTicketConfirmationEmail({ ticket, link: "http://localhost:8080/support" });
+
+    assert.ok(email.subject.includes("PH-TKT-2026-98765"));
+    assert.ok(email.subject.includes("Barcode scanner not reading Paracetamol QR"));
+
+    // HTML checks
+    assert.ok(email.html.includes("PH-TKT-2026-98765"));
+    assert.ok(email.html.includes("Rupak Sharma"));
+    assert.ok(email.html.includes("Medicine Catalog &amp; Batch Tracking"));
+    assert.ok(email.html.includes("high"));
+    assert.ok(email.html.includes("Scanner beeps but does not add item to POS cart"));
+    assert.ok(email.html.includes("Next Steps & Support SLA"));
+    assert.ok(email.html.includes("http://localhost:8080/support"));
+
+    // Plain text checks
+    assert.ok(email.text.includes("PH-TKT-2026-98765"));
+    assert.ok(email.text.includes("Scanner beeps but does not add item to POS cart"));
+    assert.ok(email.text.includes("http://localhost:8080/support"));
+  });
+
+  test("escapes HTML in user description and title to prevent injection", () => {
+    const ticket = {
+      ticketId: "PH-TKT-2026-11223",
+      title: "Test <script>alert(1)</script>",
+      issueType: "general_inquiry",
+      description: "Sample <img src=x onerror=alert('xss')> & critical info",
+      severity: "critical",
+      userName: "Tester <script>",
+    };
+
+    const email = buildTicketConfirmationEmail({ ticket });
+    assert.ok(!email.html.includes("<script>alert(1)</script>"));
+    assert.ok(!email.html.includes("<img src=x"));
+    assert.ok(email.html.includes("&lt;script&gt;alert(1)&lt;/script&gt;"));
+    assert.ok(email.html.includes("&lt;img src=x"));
+    assert.ok(email.html.includes("&amp; critical info"));
+  });
+});
+
+describe(
+  "Support Ticket System (Integration)",
+  { skip: !connected && "MongoDB not available - skipped" },
+  () => {
+    test("generateTicketId produces PH-TKT-YYYY-##### format", async () => {
+      const ticketId = await generateTicketId();
+      const currentYear = new Date().getFullYear();
+      const pattern = new RegExp(`^PH-TKT-${currentYear}-\\d{5}$`);
+      assert.match(ticketId, pattern);
+    });
+
+    test("validation rejects invalid ticket submissions (missing fields or too short)", async () => {
+      // Missing title & description & screenshot
+      const res1 = await request("/tickets", {
+        method: "POST",
+        body: {
+          issueType: "billing_pos",
+        },
+      });
+      assert.equal(res1.status, 422);
+
+      // Title too short (< 2 chars)
+      const res2 = await request("/tickets", {
+        method: "POST",
+        body: {
+          title: "a",
+          issueType: "billing_pos",
+          description: "This is a valid description",
+          screenshot: "data:image/png;base64,sample",
+        },
+      });
+      assert.equal(res2.status, 422);
+
+      // Description too short (< 5 chars)
+      const res3 = await request("/tickets", {
+        method: "POST",
+        body: {
+          title: "Valid title",
+          issueType: "billing_pos",
+          description: "1234",
+          screenshot: "data:image/png;base64,sample",
+        },
+      });
+      assert.equal(res3.status, 422);
+
+      // Invalid severity enum
+      const res4 = await request("/tickets", {
+        method: "POST",
+        body: {
+          title: "Valid title",
+          issueType: "billing_pos",
+          description: "This is a valid description",
+          severity: "ultra-high",
+          screenshot: "data:image/png;base64,sample",
+        },
+      });
+      assert.equal(res4.status, 422);
+    });
+
+    let createdTicket;
+    test("raise ticket with soft-auth fallback successfully", async () => {
+      const payload = {
+        title: "Test ticket: Barcode scanner not reading batch QR code",
+        issueType: "medicines_batches",
+        description: "Scanner beeps when scanning Paracetamol 500mg batch PH-2408-01, but no line item is added to the cart.",
+        severity: "high",
+        screenshot: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        userName: "Satya Prakash",
+        userEmail: "satya@pharmacy.com",
+        userRole: "Pharmacist",
+        orgName: "Apollo Pharmacy",
+      };
+
+      const res = await request("/tickets", {
+        method: "POST",
+        body: payload,
+      });
+
+      assert.equal(res.status, 201);
+      const json = await res.json();
+      assert.equal(json.success, true);
+      assert.equal(json.message, "Ticket has been raised successfully");
+      assert.ok(json.data);
+      assert.ok(json.data._id);
+      assert.match(json.data.ticketId, /^PH-TKT-\d{4}-\d{5}$/);
+      assert.equal(json.data.title, payload.title);
+      assert.equal(json.data.issueType, payload.issueType);
+      assert.equal(json.data.description, payload.description);
+      assert.equal(json.data.severity, "high");
+      assert.equal(json.data.status, "open");
+      assert.equal(json.data.userName, "Satya Prakash");
+      assert.equal(json.data.userEmail, "satya@pharmacy.com");
+      assert.equal(json.data.userRole, "Pharmacist");
+      assert.equal(json.data.orgName, "Apollo Pharmacy");
+      assert.equal(json.data.userId, null);
+      assert.equal(typeof json.data.confirmationEmailSent, "boolean");
+
+      createdTicket = json.data;
+    });
+
+    // The ticket above was raised through the public form, so it has no userId —
+    // the reporter is identified only by the email captured in the body. These
+    // accounts exist to exercise the read/write scoping rules.
+    const stamp = Date.now();
+    let reporterToken;
+    let strangerToken;
+    let adminToken;
+    let ownedTicket;
+    let strangerTicket;
+
+    test("create the reporter, a stranger and an admin account", async () => {
+      const reporter = await createTestUser({
+        name: "Satya Prakash",
+        email: `reporter-${stamp}@pharmacy.com`,
+      });
+      reporterToken = reporter.token;
+
+      const stranger = await createTestUser({
+        name: "Nosy Stranger",
+        email: `stranger-${stamp}@example.com`,
+      });
+      strangerToken = stranger.token;
+
+      const admin = await createTestUser({
+        name: "Support Admin",
+        email: `admin-${stamp}@pharmacy.com`,
+        role: "Admin",
+      });
+      adminToken = admin.token;
+
+      assert.ok(reporterToken && strangerToken && adminToken);
+    });
+
+    test("raise a ticket while signed in links it to the caller", async () => {
+      // Titles must start with "Test ticket" so the suite's after() hook
+      // cleans these rows up out of the shared dev database.
+      const res = await request("/tickets", {
+        method: "POST",
+        token: reporterToken,
+        body: {
+          title: `Test ticket: reporter issue ${stamp}`,
+          issueType: "general_inquiry",
+          description: "Signed-in reporter cannot see the tax summary widget.",
+        },
+      });
+      assert.equal(res.status, 201);
+      ownedTicket = (await res.json()).data;
+      assert.ok(ownedTicket.userId, "an authenticated ticket must be linked to a user");
+
+      const other = await request("/tickets", {
+        method: "POST",
+        token: strangerToken,
+        body: {
+          title: `Test ticket: stranger issue ${stamp}`,
+          issueType: "general_inquiry",
+          description: "A different user's ticket, used to prove scoping.",
+        },
+      });
+      assert.equal(other.status, 201);
+      strangerTicket = (await other.json()).data;
+      assert.notEqual(String(ownedTicket._id), String(strangerTicket._id));
+    });
+
+    test("reading tickets requires authentication", async () => {
+      // The list route used to accept an anonymous `?userEmail=` and return that
+      // person's tickets; the detail route skipped its ownership check entirely
+      // when `req.user` was absent.
+      assert.equal((await request("/tickets")).status, 401);
+      assert.equal((await request(`/tickets/${createdTicket._id}`)).status, 401);
+      assert.equal((await request(`/tickets/${createdTicket.ticketId}`)).status, 401);
+      assert.equal((await request(`/tickets/${ownedTicket._id}`)).status, 401);
+      assert.equal((await request("/tickets?userEmail=satya@pharmacy.com")).status, 401);
+    });
+
+    test("updating ticket status requires authentication and does not mutate", async () => {
+      // `optionalAuth` + a handler that never referenced `req.user` meant anyone
+      // could close or resolve any ticket by guessing its id.
+      for (const id of [createdTicket.ticketId, ownedTicket.ticketId]) {
+        const res = await request(`/tickets/${id}/status`, {
+          method: "PATCH",
+          body: { status: "closed" },
+        });
+        assert.equal(res.status, 401);
+      }
+
+      assert.equal((await Ticket.findById(createdTicket._id).lean()).status, "open");
+      assert.equal((await Ticket.findById(ownedTicket._id).lean()).status, "open");
+    });
+
+    test("reporter can read their own ticket by MongoDB _id", async () => {
+      assert.ok(ownedTicket?._id);
+      const res = await request(`/tickets/${ownedTicket._id}`, { token: reporterToken });
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.success, true);
+      assert.equal(json.data.ticketId, ownedTicket.ticketId);
+      assert.equal(json.data.title, ownedTicket.title);
+    });
+
+    test("reporter can read their own ticket by human-readable ticketId", async () => {
+      assert.ok(ownedTicket?.ticketId);
+      const res = await request(`/tickets/${ownedTicket.ticketId}`, { token: reporterToken });
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.success, true);
+      assert.equal(json.data._id, ownedTicket._id);
+      assert.equal(json.data.title, ownedTicket.title);
+    });
+
+    test("get ticket with unknown ID returns 404", async () => {
+      const res = await request("/tickets/PH-TKT-9999-00000", { token: reporterToken });
+      assert.equal(res.status, 404);
+      const json = await res.json();
+      assert.equal(json.success, false);
+    });
+
+    test("a different authenticated user cannot read the ticket", async () => {
+      const res = await request(`/tickets/${ownedTicket.ticketId}`, { token: strangerToken });
+      assert.equal(res.status, 403);
+    });
+
+    test("a ticket raised anonymously is not readable by an unrelated user", async () => {
+      // `userId` is null, so ownership falls back to the email in the body —
+      // which the stranger's account does not match.
+      const res = await request(`/tickets/${createdTicket.ticketId}`, { token: strangerToken });
+      assert.equal(res.status, 403);
+    });
+
+    test("a different authenticated user cannot change the ticket status", async () => {
+      const res = await request(`/tickets/${ownedTicket.ticketId}/status`, {
+        method: "PATCH",
+        token: strangerToken,
+        body: { status: "resolved" },
+      });
+      assert.equal(res.status, 403);
+
+      assert.equal((await Ticket.findById(ownedTicket._id).lean()).status, "open");
+    });
+
+    test("list tickets is scoped to the caller", async () => {
+      const res = await request("/tickets?status=open&page=1&limit=20", {
+        token: reporterToken,
+      });
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.success, true);
+      assert.equal(json.message, "Tickets list");
+      assert.ok(Array.isArray(json.data));
+      assert.ok(json.meta);
+      assert.equal(json.meta.page, 1);
+      assert.equal(json.meta.limit, 20);
+      assert.ok(typeof json.meta.total === "number");
+      assert.ok(typeof json.meta.totalPages === "number");
+
+      assert.ok(json.data.some((t) => t.ticketId === ownedTicket.ticketId));
+      assert.ok(!json.data.some((t) => t.ticketId === strangerTicket.ticketId));
+    });
+
+    test("a userEmail query parameter no longer widens list scoping", async () => {
+      // This parameter used to be the entire authorization decision for an
+      // anonymous caller. It is now an inert filter on an already-scoped result
+      // set, so naming another user's address returns only your own tickets.
+      const res = await request("/tickets?userEmail=stranger@example.com", {
+        token: reporterToken,
+      });
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.ok(!json.data.some((t) => t.ticketId === strangerTicket.ticketId));
+    });
+
+    test("list tickets with search query parameter", async () => {
+      const res = await request(
+        `/tickets?search=${encodeURIComponent(ownedTicket.ticketId)}`,
+        { token: reporterToken },
+      );
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.ok(json.data.some((t) => t.ticketId === ownedTicket.ticketId));
+    });
+    test("reporter can update ticket status via PATCH /tickets/:id/status", async () => {
+      const res = await request(`/tickets/${ownedTicket.ticketId}/status`, {
+        method: "PATCH",
+        token: reporterToken,
+        body: { status: "in_progress" },
+      });
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.success, true);
+      assert.equal(json.data.status, "in_progress");
+
+      // Verify persistence
+      const verifyRes = await request(`/tickets/${ownedTicket._id}`, { token: reporterToken });
+      const verifyJson = await verifyRes.json();
+      assert.equal(verifyJson.data.status, "in_progress");
+    });
+
+    test("admin can update ticket status via PATCH /tickets/:id/status", async () => {
+      const res = await request(`/tickets/${createdTicket.ticketId}/status`, {
+        method: "PATCH",
+        token: adminToken,
+        body: { status: "in_progress" },
+      });
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.success, true);
+      assert.equal(json.data.status, "in_progress");
+
+      // Verify persistence
+      const verifyRes = await request(`/tickets/${createdTicket._id}`, { token: adminToken });
+      const verifyJson = await verifyRes.json();
+      assert.equal(verifyJson.data.status, "in_progress");
+    });
+
+    test("an Admin can read and update a ticket they do not own", async () => {
+      const read = await request(`/tickets/${ownedTicket.ticketId}`, { token: adminToken });
+      assert.equal(read.status, 200);
+
+      // Including the anonymously-raised ticket, which has no userId at all.
+      const orphan = await request(`/tickets/${createdTicket.ticketId}`, { token: adminToken });
+      assert.equal(orphan.status, 200);
+
+      const write = await request(`/tickets/${ownedTicket.ticketId}/status`, {
+        method: "PATCH",
+        token: adminToken,
+        body: { status: "resolved" },
+      });
+      assert.equal(write.status, 200);
+      const json = await write.json();
+      assert.equal(json.data.status, "resolved");
+    });
+  },
+);
+

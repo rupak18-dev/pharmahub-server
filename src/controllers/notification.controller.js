@@ -42,6 +42,13 @@ export const getNotification = asyncHandler(async (req, res) => {
 
 export const createNotification = asyncHandler(async (req, res) => {
   const item = await Notification.create(req.body);
-  recordAudit({ userId: req.user?._id, userName: req.user?.name, action: "Notification created", entityType: "notification", entityId: item._id, ip: req.ip });
+  recordAudit({
+    userId: req.user?._id,
+    userName: req.user?.name,
+    action: "Notification created",
+    entityType: "notification",
+    entityId: item._id,
+    ip: req.ip,
+  });
   return ok(res, item, "Notification created");
 });

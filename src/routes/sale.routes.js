@@ -13,6 +13,11 @@ router.use(auth);
 router.get("/", authorize("sales", "view"), saleController.listSales);
 router.get("/:id", authorize("sales", "view"), saleController.getSale);
 router.post("/", authorize("sales", "create"), validate(saleSchemas.create), saleController.create);
-router.post("/:id/void", authorize("sales", "update"), validate(saleSchemas.void), saleController.voidSaleById);
+router.post(
+  "/:id/void",
+  authorize("sales", "update"),
+  validate(saleSchemas.void),
+  saleController.voidSaleById,
+);
 
 export default router;
