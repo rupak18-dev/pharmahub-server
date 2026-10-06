@@ -210,7 +210,7 @@ describe("full API flow (requires MongoDB)", { skip: !connected && "MongoDB not 
   });
 
   test("list batches returns serialized nested docs with a plain medicineId", async () => {
-    const res = await request("/batches", { token });
+    const res = await request(`/batches?medicineId=${batchMedicineId}`, { token });
     assert.equal(res.status, 200);
     const body = await res.json();
     const found = body.data.find((b) => b.id === batchId);
