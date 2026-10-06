@@ -199,6 +199,7 @@ export const resendVerification = asyncHandler(async (req, res) => {
     .lean();
 
   let devCode;
+  let emailReason;
   if (user?.active && user.emailVerified === false) {
     const verification = buildVerificationEmail({
       name: user.name,
@@ -213,6 +214,7 @@ export const resendVerification = asyncHandler(async (req, res) => {
       html: verification.html,
     });
     devCode = delivery?.devCode;
+    emailReason = delivery?.reason ?? null;
     // The response below is intentionally identical whether or not the account
     // exists, so a delivery failure cannot be reported in the body without
     // turning this endpoint into an account-enumeration oracle. Log it hard
@@ -228,11 +230,12 @@ export const resendVerification = asyncHandler(async (req, res) => {
     }
   }
   // Same response message whether or not the account exists — no account
-  // enumeration. The dev-only `devCode` (present only when delivery is skipped,
-  // i.e. nothing was emailed) does not reveal account existence on its own.
+  // enumeration. `devCode`/`emailReason` are only ever populated inside the
+  // branch above, and the payload is null when that branch is skipped, so the
+  // body still does not reveal whether the account exists.
   return ok(
     res,
-    devCode ? { devCode } : null,
+    devCode || emailReason ? { devCode, emailReason } : null,
     "If that email is registered and unverified, a new code is on its way.",
   );
 });

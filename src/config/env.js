@@ -243,6 +243,28 @@ export const env = {
   // Real production must never set EMAIL_DEV_CODE_PROD=true.
   echoDevCodeInProduction: process.env.EMAIL_DEV_CODE_PROD === "true",
 
+  // Auto-echo the code while NO email provider is configured at all — i.e. only
+  // when the mailer skipped with reason `email_unconfigured`. This needs no
+  // dashboard change, so a fresh test deployment works immediately.
+  //
+  // It is self-killing: the moment SMTP_HOST / RESEND_API_KEY is configured the
+  // mailer stops returning `email_unconfigured`, the reason no longer matches,
+  // and the echo switches itself off with no redeploy. Set
+  // EMAIL_AUTO_ECHO_UNCONFIGURED=false to turn it off up front instead.
+  //
+  // Note the deliberate trade-off: while this is on, anyone can register an
+  // address they don't own and verify it immediately. That is acceptable for a
+  // test service with no working mail, and it disappears the day SMTP is added.
+  autoEchoUnconfigured: process.env.EMAIL_AUTO_ECHO_UNCONFIGURED !== "false",
+
+  // Echo the code even when the email WAS delivered — the local-dev convenience
+  // of seeing the code on screen without hunting through an inbox. This is a
+  // different (and much stronger) leak than `autoEchoUnconfigured`: the code
+  // provably reached a real inbox, so anyone who can see the response can read
+  // it too. Therefore it is strictly opt-in, default OFF, and must stay off in
+  // real production.
+  echoCodeAlways: process.env.EMAIL_SHOW_CODE === "true",
+
   cookie: {
     name: "pharmahub_session",
 

@@ -26,6 +26,32 @@ function generateCode() {
 }
 
 /**
+ * Decides whether a generated code may be echoed back to the caller as
+ * `devCode`. Ordered most-specific first:
+ *
+ * 1. Delivered successfully — the code provably reached a real inbox, so this
+ *    is the only case that is a genuine leak. Opt-in only (`EMAIL_SHOW_CODE`),
+ *    default off, for local dev convenience.
+ * 2. `email_unconfigured` — no provider exists at all, so the code is provably
+ *    unreadable by anyone. Echo it automatically; this self-kills as soon as
+ *    SMTP/Resend is configured, because the reason no longer matches.
+ * 3. `delivery_failed` — never echoes, even with the opt-ins set. A provider IS
+ *    configured, so the code may have reached a real inbox despite the error.
+ * 4. Any other future skip reason keeps the original opt-in gate, so nothing
+ *    starts echoing by accident.
+ */
+export function shouldEchoDevCode(sendResult) {
+  // Every `sendEmail` path returns an object. A missing one is an anomaly, not
+  // a delivery success — never echo on it, or a future early-return would leak
+  // a code that nobody can prove was sent.
+  if (!sendResult) return false;
+  if (!sendResult.skipped) return env.echoCodeAlways;
+  if (sendResult.reason === "email_unconfigured") return env.autoEchoUnconfigured;
+  if (sendResult.reason === "delivery_failed") return false;
+  return env.echoDevCode && (!env.isProduction || env.echoDevCodeInProduction);
+}
+
+/**
  * Generates a 6-digit code for `email`/`purpose`, stores a hash, and emails it.
  * `subject`/`html` override the default email copy; `{{code}}` inside them is
  * replaced with the generated code.
@@ -86,14 +112,10 @@ export async function createAndSendOtp({ email, purpose, subject, html }) {
     );
   }
 
-  // Frontend dev contract: when delivery is skipped (no SMTP/Resend), surface
-  // the code as `devCode` so dev flows still work — but ONLY with an explicit
-  // opt-in (EMAIL_DEV_CODE=true), outside production, and never once the code
-  // has actually been emailed to anyone.
+  // Frontend dev contract: surface the code as `devCode` so UIs keep working
+  // when no email ever goes out. See `shouldEchoDevCode` for the rules.
   const skipped = Boolean(sendResult?.skipped);
-  const echoAllowed =
-    env.echoDevCode && (!env.isProduction || env.echoDevCodeInProduction);
-  const devCode = skipped && echoAllowed ? code : undefined;
+  const devCode = skipped && shouldEchoDevCode(sendResult) ? code : undefined;
   return { skipped, devCode, reason: sendResult?.reason ?? null };
 }
 
